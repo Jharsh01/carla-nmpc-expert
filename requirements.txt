@@ -1,0 +1,8 @@
+# Everything runs in SimLingo's Python 3.8 environment (external/simlingo_venv, made by scripts/install_simlingo.sh,
+# which installs these too): the leaderboard and both agents run in one process there.
+carla==0.9.15
+casadi==3.7.2  # also the C++ library, FATROP and IPOPT the NMPC links against
+pybind11==3.0.4
+numpy==1.23.0  # SimLingo's
+imageio-ffmpeg>=0.4
+pytest>=7

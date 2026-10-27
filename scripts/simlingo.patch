@@ -1,0 +1,43 @@
+diff --git a/team_code/agent_simlingo.py b/team_code/agent_simlingo.py
+index 4675d47..8a45811 100644
+--- a/team_code/agent_simlingo.py
++++ b/team_code/agent_simlingo.py
+@@ -58,7 +58,7 @@ def get_entry_point():
+     return 'LingoAgent'
+ 
+ 
+-DEBUG = False # saves images during evaluation
++DEBUG = os.environ.get("SIMLINGO_DEBUG") == "1"  # saves images during evaluation
+ HD_VIZ = False
+ USE_UKF = True
+ 
+@@ -171,6 +171,11 @@ class LingoAgent(autonomous_agent.AutonomousAgent):
+             ).to(self.device)
+         torch.set_default_dtype(default_dtype)
+         self.model.load_state_dict(torch.load(self.config_path))
++        # SIMLINGO_FAST=1: inference mode (upstream never calls eval(), so the LoRA dropout of 0.1 stays
++        # on while driving) and the LoRA weights merged into the LLM, which halves its kernel launches
++        if os.environ.get("SIMLINGO_FAST") == "1":
++            self.model.eval()
++            self.model.language_model.model = self.model.language_model.model.merge_and_unload()
+         self.iter = self.config_path.split("epoch=")[-1].split("/")[0]
+         self.session = self.config_path.split("/")[-4]
+         
+diff --git a/team_code/config_simlingo.py b/team_code/config_simlingo.py
+index 5b537d9..1e580d8 100644
+--- a/team_code/config_simlingo.py
++++ b/team_code/config_simlingo.py
+@@ -1,3 +1,4 @@
++import os
+ class GlobalConfig:
+     def __init__(self):
+         """ base architecture configurations """
+@@ -6,7 +7,7 @@ class GlobalConfig:
+         # -----------------------------------------------------------------------------
+         self.eval_route_as = 'target_point' # "target_point" or "target_point_command" "command", -1 -> use from model config
+         # if target_point_command (trained on both we eval with targetpoint)
+-        self.use_cot = True
++        self.use_cot = os.environ.get("SIMLINGO_COT", "1") == "1"  # commentary before the waypoints
+ 
+         self.carla_frame_rate = 1.0 / 20.0  # CARLA frame rate in milliseconds
+         self.carla_fps = 20  # Simulator Frames per second
