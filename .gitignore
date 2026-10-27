@@ -8,7 +8,7 @@ __pycache__/
 .pytest_cache/
 
 # outputs
-results/
+
 *.mp4
 
 # editors
@@ -18,3 +18,7 @@ results/
 
 # shared downloads, possibly a symlink
 external
+
+
+# outputs
+results/

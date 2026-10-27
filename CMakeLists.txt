@@ -69,3 +69,18 @@ add_test(NAME sim.test_bicycle_realtime COMMAND test_bicycle_realtime)
 pybind11_add_module(expertctl bindings/expertctl.cpp)
 target_link_libraries(expertctl PRIVATE sim)
 set_target_properties(expertctl PROPERTIES BUILD_RPATH "${RPATH}" LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python)
+
+# ---- the urban NMPC (core/urban)
+
+add_library(urban STATIC core/urban/src/urban_nmpc.cpp core/urban/src/behaviour.cpp)
+target_include_directories(urban PUBLIC ${CMAKE_SOURCE_DIR}/core/urban/include)
+target_link_libraries(urban PUBLIC track_control::track_control Threads::Threads PRIVATE casadi::casadi)
+target_link_libraries(expertctl PRIVATE urban)
+
+add_executable(urban_scenarios sim/urban/scenarios.cpp)  # offline closed-loop scenarios for the urban NMPC
+target_link_libraries(urban_scenarios PRIVATE urban sim)
+target_compile_options(urban_scenarios PRIVATE -Wno-missing-field-initializers)  # scenarios are aggregates, partly filled
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/urban_cache)
+target_compile_definitions(urban_scenarios PRIVATE URBAN_CACHE_DIR="${CMAKE_BINARY_DIR}/urban_cache")
+set_target_properties(urban_scenarios PROPERTIES BUILD_RPATH "${RPATH}")
+add_test(NAME urban.scenarios COMMAND urban_scenarios)

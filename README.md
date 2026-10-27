@@ -9,14 +9,26 @@ drive better than PDM-Lite, in two modes on one NMPC core:
 - **SimLingo + NMPC (Mode B):** [SimLingo](https://github.com/RenzKa/simlingo)'s path and speed waypoints as the
   NMPC's reference in place of its PID, the same world information as constraints.
 
-The plan, its phases and milestones: [docs/plan.md](docs/plan.md). Where the code came from: [PROVENANCE.md](PROVENANCE.md).
+The plan, its phases and milestones: [docs/plan.md](docs/plan.md).
+
+## Status
+
+- **M0, done:** the repository bootstrapped, built against SimLingo's Python 3.8.
+- **M1, done offline:** the urban NMPC and the behaviour layer (most of M3 came forward, since the scenarios needed it).
+  All 11 offline scenarios pass: a bend, a lead braking hard, a cut-in, a pedestrian from behind a van, a red light,
+  the red-light dilemma zone, a stop sign, overtaking a parked car (clear, and waiting for oncoming traffic), and
+  yielding to or passing a crossing car. p95 step time is 12 ms with one candidate and 48 ms with three in parallel.
+- **Next, M2:** the world model (CARLA to `Scene`, with the visibility filter), identifying the Lincoln MKZ's
+  actuation, and the expert agent on an empty route. Where the code came from: [PROVENANCE.md](PROVENANCE.md).
 
 ## Layout
 
 | | |
 |---|---|
-| `core/track_control/` | C++ NMPC (CasADi + FATROP), pure pursuit, paths, the bicycle model, directives |
-| `sim/plant/` | the bicycle plant, for closed-loop tests without CARLA |
+| `core/urban/` | the urban NMPC and the behaviour layer ([its README](core/urban/README.md)) |
+| `core/track_control/` | from carla-track-control: the race-track NMPC, pure pursuit, paths, the bicycle model, directives |
+| `sim/urban/` | closed-loop scenarios for the urban NMPC without CARLA (`build/urban_scenarios`) |
+| `sim/plant/` | the bicycle plant |
 | `bindings/expertctl.cpp` | the Python module `expertctl` |
 | `expert/` | Python: frames, actuation, the world model and the leaderboard agents |
 | `scripts/` | CARLA, SimLingo and Bench2Drive: install and run |
