@@ -17,6 +17,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,9 @@ public:
     Pose pose(double s, double e_y = 0.0) const;
     // Path coordinates (s, e_y) of the world point (x, y): the nearest path point.
     std::pair<double, double> project(double x, double y) const;
+    // The same, searching only the pieces of an open path that overlap [s_from, s_to]: its cost does not grow with
+    // the path's length, and a stretch of a long route that passes near another part of it is not mistaken for it.
+    std::pair<double, double> project(double x, double y, double s_from, double s_to) const;
     // Distance travelled from the start to `s` along the line offset by `e_y` (an inside line is shorter).
     double offset_length(double s, double e_y) const;
     // Inverse of `offset_length`; wraps round the lap on a closed path.
@@ -71,6 +75,7 @@ private:
     void add(double piece_length, double kappa);  // append a piece (skips empty ones)
     void finish(const Pose& start, bool closed);  // arc lengths and poses of the pieces
     std::pair<int, double> piece(double s) const;  // index of the piece at s and the distance into it
+    std::pair<double, double> project_pieces(double x, double y, std::size_t first, std::size_t last) const;
     std::vector<double> cumulative(double e_y) const;
 
     double length_ = 0.0;

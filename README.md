@@ -18,8 +18,9 @@ The plan, its phases and milestones: [docs/plan.md](docs/plan.md).
   All 11 offline scenarios pass: a bend, a lead braking hard, a cut-in, a pedestrian from behind a van, a red light,
   the red-light dilemma zone, a stop sign, overtaking a parked car (clear, and waiting for oncoming traffic), and
   yielding to or passing a crossing car. p95 step time is 12 ms with one candidate and 48 ms with three in parallel.
-- **Next, M2:** the world model (CARLA to `Scene`, with the visibility filter), identifying the Lincoln MKZ's
-  actuation, and the expert agent on an empty route. Where the code came from: [PROVENANCE.md](PROVENANCE.md).
+- **M2, in progress:** the MKZ identified, the world model, the expert driving in CARLA (604 m with 40 traffic cars,
+  no contact), and the leaderboard agent. Bench2Drive route 0 does not drive yet. Where it stopped and how to pick
+  it up: **[docs/STATUS.md](docs/STATUS.md)**. Where the code came from: [PROVENANCE.md](PROVENANCE.md).
 
 ## Layout
 

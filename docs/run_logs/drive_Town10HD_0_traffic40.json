@@ -1,0 +1,26 @@
+{
+ "route_m": 604.3,
+ "end": "route end",
+ "collision": [],
+ "sim_s": 118.0,
+ "wall_s": 106.0,
+ "progress_m": 600.1,
+ "max_abs_e_y": 0.51,
+ "p95_abs_e_y": 0.29,
+ "mean_speed": 5.09,
+ "step_ms_p50": 25.2,
+ "step_ms_p95": 50.0,
+ "step_ms_max": 136.2,
+ "failed_solves": 5,
+ "labels": [
+  "base",
+  "pass:311",
+  "pass:315"
+ ],
+ "notes": [
+  "switched from base to pass:311",
+  "switched from base to pass:315",
+  "switched from pass:311 to base",
+  "switched from pass:315 to base"
+ ]
+}

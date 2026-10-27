@@ -1,0 +1,12 @@
+scenario                       clear [m]     jerk    a_lat    s_end  p95 [ms]  fails  chosen                       problems
+curve                    ok          inf      4.3     3.13    191.9      14.1      0  base                         
+lead_brake               ok         3.00     12.2     0.00     80.7      13.7      0  base                         
+cut_in                   ok         2.59     14.0     0.01    105.6      13.4      0  base                         
+pedestrian_behind_van    ok         1.16     66.6     2.83     98.0      35.2      1  base                         
+red_light                ok          inf     10.9     0.00    118.7      13.4      0  base                         
+red_light_dilemma        ok          inf      4.3     0.00    118.0      12.4      0  base                         
+stop_sign                ok          inf     11.0     0.00    107.9      13.2      0  base                         
+parked_car_overtake      ok         1.08      1.9     3.49    213.8      46.8      0  base>borrow_left>base        
+parked_car_wait          ok         1.10     11.0     4.55    159.4      39.8      0  base>borrow_left>base        
+crossing_yield           ok         3.70      8.1     0.00    122.4      13.8      0  base                         
+crossing_pass            ok        30.15      2.3     0.00    118.7      46.4      0  base>pass:1>base             

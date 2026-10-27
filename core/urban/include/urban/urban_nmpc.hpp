@@ -173,7 +173,8 @@ public:
     Plan solve(const Problem& problem);
     void reset();  // forget the previous plan: the next solve starts cold
 
-    // The ego's path state [s, e_y, e_psi, v, a, delta] for a measurement.
+    // The ego's path state [s, e_y, e_psi, v, a, delta] for a measurement: projected onto the route near where it
+    // was last (the whole route the first time and after reset()).
     Eigen::Matrix<double, NX, 1> path_state(const Ego& ego) const;
     // Names of the constraint groups, in the order of Plan::slack_max.
     static const std::vector<std::string>& groups();
@@ -192,6 +193,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    mutable double s_last_ = NAN;
 };
 
 }  // namespace ex

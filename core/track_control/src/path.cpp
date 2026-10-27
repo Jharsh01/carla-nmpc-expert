@@ -200,9 +200,18 @@ Pose Path::pose(double s, double e_y) const {
     return {at.x - e_y * std::sin(at.psi), at.y + e_y * std::cos(at.psi), at.psi};
 }
 
-std::pair<double, double> Path::project(double x, double y) const {
+std::pair<double, double> Path::project(double x, double y) const { return project_pieces(x, y, 0, seg_length_.size()); }
+
+std::pair<double, double> Path::project(double x, double y, double s_from, double s_to) const {
+    if (closed_ || (s_from <= 0.0 && s_to >= length_)) return project(x, y);
+    const size_t first = std::max(0, piece(std::max(0.0, s_from)).first);
+    const size_t last = static_cast<size_t>(piece(std::min(s_to, length_)).first) + 1;
+    return project_pieces(x, y, first, std::min(last, seg_length_.size()));
+}
+
+std::pair<double, double> Path::project_pieces(double x, double y, size_t first, size_t last) const {
     double best = std::numeric_limits<double>::infinity(), best_s = 0.0, best_e = 0.0;
-    for (size_t k = 0; k < seg_length_.size(); ++k) {
+    for (size_t k = first; k < last; ++k) {
         const Pose& p0 = seg_pose_[k];
         const double kappa = seg_kappa_[k], piece_length = seg_length_[k];
         double ds;

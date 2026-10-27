@@ -9,6 +9,7 @@
 #include "track_control/directive.hpp"
 #include "track_control/path.hpp"
 #include "track_control/vehicle_params.hpp"
+#include "urban/behaviour.hpp"
 #include "urban/urban_nmpc.hpp"
 
 namespace py = pybind11;
@@ -29,7 +30,9 @@ PYBIND11_MODULE(expertctl, m) {
         .def_property_readonly("closed", &Path::closed)
         .def("curvature", &Path::curvature)
         .def("pose", &Path::pose, py::arg("s"), py::arg("e_y") = 0.0)
-        .def("project", &Path::project)
+        .def("project", py::overload_cast<double, double>(&Path::project, py::const_), py::arg("x"), py::arg("y"))
+        .def("project", py::overload_cast<double, double, double, double>(&Path::project, py::const_), py::arg("x"),
+             py::arg("y"), py::arg("s_from"), py::arg("s_to"))
         .def("wrap", &Path::wrap)
         .def("difference", &Path::difference)
         .def_property_readonly("piece_lengths", &Path::piece_lengths)
@@ -150,4 +153,92 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readonly("a_min", &ex::UrbanNMPC::a_min)
         .def_readonly("solve_times", &ex::UrbanNMPC::solve_times)
         .def_readonly("failures", &ex::UrbanNMPC::failures);
+
+    // ---- the behaviour layer (core/urban/include/urban/behaviour.hpp)
+
+    py::class_<ex::Actor> actor(m, "Actor");
+    py::enum_<ex::Actor::Kind>(actor, "Kind")
+        .value("vehicle", ex::Actor::vehicle)
+        .value("bike", ex::Actor::bike)
+        .value("walker", ex::Actor::walker)
+        .value("object", ex::Actor::object);
+    actor.def(py::init<>())
+        .def_readwrite("id", &ex::Actor::id)
+        .def_readwrite("kind", &ex::Actor::kind)
+        .def_readwrite("length", &ex::Actor::length)
+        .def_readwrite("width", &ex::Actor::width)
+        .def_readwrite("parked", &ex::Actor::parked)
+        .def_readwrite("t", &ex::Actor::t)
+        .def_readwrite("x", &ex::Actor::x)
+        .def_readwrite("y", &ex::Actor::y)
+        .def_readwrite("psi", &ex::Actor::psi);
+
+    py::class_<ex::LaneSection>(m, "LaneSection")
+        .def(py::init([](double s_from, double s_to, double lo, double hi, double left_width, bool left_oncoming,
+                         bool left_allowed) {
+                 return ex::LaneSection{s_from, s_to, lo, hi, left_width, left_oncoming, left_allowed};
+             }),
+             py::arg("s_from") = 0.0, py::arg("s_to") = ex::INF, py::arg("lo") = -1.75, py::arg("hi") = 1.75,
+             py::arg("left_width") = 0.0, py::arg("left_oncoming") = true, py::arg("left_allowed") = false)
+        .def_readwrite("s_from", &ex::LaneSection::s_from)
+        .def_readwrite("s_to", &ex::LaneSection::s_to)
+        .def_readwrite("lo", &ex::LaneSection::lo)
+        .def_readwrite("hi", &ex::LaneSection::hi)
+        .def_readwrite("left_width", &ex::LaneSection::left_width)
+        .def_readwrite("left_oncoming", &ex::LaneSection::left_oncoming)
+        .def_readwrite("left_allowed", &ex::LaneSection::left_allowed);
+
+    py::class_<ex::StopLine> stop(m, "StopLine");
+    py::enum_<ex::StopLine::Kind>(stop, "Kind")
+        .value("red_light", ex::StopLine::red_light)
+        .value("amber_light", ex::StopLine::amber_light)
+        .value("stop_sign", ex::StopLine::stop_sign)
+        .value("route_end", ex::StopLine::route_end);
+    stop.def(py::init([](int id, ex::StopLine::Kind kind, double s) { return ex::StopLine{id, kind, s}; }),
+             py::arg("id"), py::arg("kind"), py::arg("s"))
+        .def_readwrite("id", &ex::StopLine::id)
+        .def_readwrite("kind", &ex::StopLine::kind)
+        .def_readwrite("s", &ex::StopLine::s);
+
+    py::class_<ex::Scene>(m, "Scene")
+        .def(py::init<>())
+        .def_readwrite("t", &ex::Scene::t)
+        .def_readwrite("ego", &ex::Scene::ego)
+        .def_readwrite("v_max", &ex::Scene::v_max)
+        .def_readwrite("v_ref_t", &ex::Scene::v_ref_t)
+        .def_readwrite("v_ref", &ex::Scene::v_ref)
+        .def_readwrite("line_s", &ex::Scene::line_s)
+        .def_readwrite("line_e", &ex::Scene::line_e)
+        .def_readwrite("lanes", &ex::Scene::lanes)
+        .def_readwrite("actors", &ex::Scene::actors)
+        .def_readwrite("stops", &ex::Scene::stops);
+
+    py::class_<ex::Candidate>(m, "Candidate")
+        .def_readonly("label", &ex::Candidate::label)
+        .def_readonly("plan", &ex::Candidate::plan)
+        .def_readonly("score", &ex::Candidate::score);
+
+    py::class_<ex::Decision>(m, "Decision")
+        .def_readonly("label", &ex::Decision::label)
+        .def_readonly("plan", &ex::Decision::plan)
+        .def_readonly("candidates", &ex::Decision::candidates)
+        .def_readonly("wall_time", &ex::Decision::wall_time)
+        .def_readonly("notes", &ex::Decision::notes);
+
+    using BOpt = ex::Behaviour::Options;
+    py::class_<BOpt> bopt(m, "BehaviourOptions");
+    bopt.def(py::init<>());
+#define BFIELD(name) bopt.def_readwrite(#name, &BOpt::name)
+    BFIELD(pool); BFIELD(look_ahead); BFIELD(gate_margin); BFIELD(gate_buffer); BFIELD(blocker_range);
+    BFIELD(oncoming_gap); BFIELD(stop_hold); BFIELD(dilemma_decel); BFIELD(hysteresis); BFIELD(w_out_of_lane);
+    BFIELD(pass_penalty); BFIELD(slack_ok);
+#undef BFIELD
+
+    py::class_<ex::Behaviour>(m, "Behaviour")
+        .def(py::init<Path, VehicleParams, Body, Opt, BOpt>(), py::arg("route"), py::arg("params"),
+             py::arg("body") = Body(), py::arg("nmpc_options") = Opt(), py::arg("options") = BOpt(),
+             py::call_guard<py::gil_scoped_release>())
+        .def("step", &ex::Behaviour::step, py::call_guard<py::gil_scoped_release>())
+        .def("reset", &ex::Behaviour::reset)
+        .def_readonly("route", &ex::Behaviour::route);
 }

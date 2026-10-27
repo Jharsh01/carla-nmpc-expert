@@ -335,10 +335,15 @@ UrbanNMPC::UrbanNMPC(Path route_, VehicleParams params, Body body_, Options o)
 
 UrbanNMPC::~UrbanNMPC() = default;
 
-void UrbanNMPC::reset() { impl_->warm = false; }
+void UrbanNMPC::reset() {
+    impl_->warm = false;
+    s_last_ = NAN;
+}
 
 Eigen::Matrix<double, NX, 1> UrbanNMPC::path_state(const Ego& ego) const {
-    const auto [s, e_y] = route.project(ego.x, ego.y);
+    // near where the car was last (a long route is not searched whole, nor mistaken where it passes near itself)
+    const auto [s, e_y] = std::isnan(s_last_) ? route.project(ego.x, ego.y) : route.project(ego.x, ego.y, s_last_ - 30.0, s_last_ + 60.0);
+    s_last_ = s;
     Eigen::Matrix<double, NX, 1> z;
     z << s, e_y, tc::wrap_angle(ego.psi - route.pose(s).psi), ego.v, ego.a, ego.delta;
     return z;
@@ -426,6 +431,12 @@ Plan UrbanNMPC::solve(const Problem& pr) {
                 if (gt.before) cap[k] = std::min(cap[k], gt.s);
                 else floor[k] = std::max(floor[k], gt.s);
             }
+        // never asked to go back: a lead already nearer than the gap, or a stop line the front is already over,
+        // holds the car where it is (a plan that reverses to restore them is not one the car can drive, and at
+        // standstill it leaves the solver crawling)
+        const double front_now = s0 + 0.5 * body.length - body.cg_to_center;
+        if (std::isfinite(lead[k])) lead[k] = std::max(lead[k], front_now + opt.gap_min);
+        if (std::isfinite(cap[k])) cap[k] = std::max(cap[k], front_now);
     }
     // in the order of the parameters in the constructor
     std::vector<double> par(z0.data(), z0.data() + NX);

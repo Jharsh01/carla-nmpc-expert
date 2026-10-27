@@ -1,0 +1,19 @@
+{
+ "route_m": 604.3,
+ "end": "time",
+ "collision": [],
+ "sim_s": 120.0,
+ "wall_s": 79.6,
+ "progress_m": 600.9,
+ "max_abs_e_y": 0.52,
+ "p95_abs_e_y": 0.25,
+ "mean_speed": 5.01,
+ "step_ms_p50": 15.6,
+ "step_ms_p95": 20.0,
+ "step_ms_max": 23.9,
+ "failed_solves": 0,
+ "labels": [
+  "base"
+ ],
+ "notes": []
+}

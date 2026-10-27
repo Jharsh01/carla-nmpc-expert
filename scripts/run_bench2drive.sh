@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Run SimLingo closed loop on Bench2Drive routes, one leaderboard process per route as SimLingo's
+# Run an agent closed loop on Bench2Drive routes, one leaderboard process per route as SimLingo's
 # own launcher (start_eval_simlingo.py) does, then compute Bench2Drive's driving score and success rate.
-# Run scripts/install_simlingo.sh first.
+# Run scripts/install_simlingo.sh first (it sets up Bench2Drive too), and for the expert build the core
+# (cmake -S . -B build && cmake --build build -j).
+#
+#   scripts/run_bench2drive.sh --agent expert --routes 0-9    the expert NMPC (expert/agents/expert_agent.py)
+#   scripts/run_bench2drive.sh --agent simlingo ...          SimLingo with its PID, as published (the default)
 #
 #   scripts/run_bench2drive.sh                       all 220 routes (days on one GPU: see below)
 #   scripts/run_bench2drive.sh --routes 0-19         routes 0 to 19 of bench2drive_split/
@@ -25,10 +29,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 
-routes=all seed=1 tries=2 debug=0 cot=1 fast=0
+routes=all seed=1 tries=2 debug=0 cot=1 fast=0 agent=simlingo
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --routes) routes=$2; shift ;;
+        --agent) agent=$2; shift ;;
         --seed) seed=$2; shift ;;
         --tries) tries=$2; shift ;;
         --debug) debug=1 ;;
@@ -44,12 +49,21 @@ SIMLINGO=$EXTERNAL/simlingo
 VPY=$EXTERNAL/simlingo_venv/bin/python
 CKPT="$EXTERNAL/simlingo_ckpt/simlingo/checkpoints/epoch=013.ckpt/pytorch_model.pt"
 SPLIT=$SIMLINGO/leaderboard/data/bench2drive_split
-[[ -x $VPY && -f $CKPT && -f $CARLA_ROOT/.carla-additional-maps ]] \
-    || { echo "SimLingo is not set up: run scripts/install_simlingo.sh" >&2; exit 1; }
-
-tag=simlingo
-[[ $cot == 0 ]] && tag+=-nocot
-[[ $fast == 1 ]] && tag+=-fast
+[[ -x $VPY && -f $CARLA_ROOT/.carla-additional-maps ]] \
+    || { echo "SimLingo and Bench2Drive are not set up: run scripts/install_simlingo.sh" >&2; exit 1; }
+case $agent in
+    simlingo)
+        [[ -f $CKPT ]] || { echo "no SimLingo checkpoint: run scripts/install_simlingo.sh" >&2; exit 1; }
+        AGENT_FILE=team_code/agent_simlingo.py AGENT_CONFIG=$CKPT
+        tag=simlingo
+        [[ $cot == 0 ]] && tag+=-nocot
+        [[ $fast == 1 ]] && tag+=-fast ;;
+    expert)
+        ls "$REPO"/build/python/expertctl*.so >/dev/null 2>&1 || { echo "build the core first (cmake --build build)" >&2; exit 1; }
+        AGENT_FILE=$REPO/expert/agents/expert_agent.py AGENT_CONFIG=""
+        tag=expert ;;
+    *) echo "unknown agent $agent (simlingo or expert)" >&2; exit 1 ;;
+esac
 [[ $debug == 1 ]] && tag+=-video
 out_root=$REPO/results/bench2drive/$tag/seed$seed
 mkdir -p "$out_root"/{res,out,viz}
@@ -69,7 +83,7 @@ fi
 # goes first: Bench2Drive's leaderboard has a team_code package of its own that would shadow it
 export CARLA_ROOT WORK_DIR=$SIMLINGO
 export SCENARIO_RUNNER_ROOT=$SIMLINGO/Bench2Drive/scenario_runner
-export PYTHONPATH="$SIMLINGO:$SIMLINGO/team_code:$CARLA_ROOT/PythonAPI/carla:$SIMLINGO/Bench2Drive/leaderboard:$SCENARIO_RUNNER_ROOT"
+export PYTHONPATH="$SIMLINGO:$SIMLINGO/team_code:$CARLA_ROOT/PythonAPI/carla:$SIMLINGO/Bench2Drive/leaderboard:$SCENARIO_RUNNER_ROOT:$REPO/build/python:$REPO"
 export SIMLINGO_DEBUG=$debug SIMLINGO_COT=$cot SIMLINGO_FAST=$fast
 FFMPEG=$("$PY" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')  
 cd "$SIMLINGO"
@@ -99,7 +113,7 @@ for i in "${ids[@]}"; do
         SAVE_PATH=$out_root/viz/ ROUTES=$route timeout 3600 "$VPY" -u \
             Bench2Drive/leaderboard/leaderboard/leaderboard_evaluator.py \
             --routes="$route" --repetitions=1 --track=SENSORS --checkpoint="$res" --timeout=600 \
-            --agent=team_code/agent_simlingo.py --agent-config="$CKPT" \
+            --agent="$AGENT_FILE" --agent-config="$AGENT_CONFIG" \
             --traffic-manager-seed="$seed" --port=20000 --traffic-manager-port=30000 \
             > "$out_root/out/$name.log" 2>&1 || true
         # the leaderboard leaves its server behind when it is killed; only ours have -graphicsadapter

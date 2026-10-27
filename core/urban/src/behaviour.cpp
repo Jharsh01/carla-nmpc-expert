@@ -86,15 +86,25 @@ Decision Behaviour::step(const Scene& sc) {
         return e - ext_e < l.hi && e + ext_e > l.lo;
     };
 
-    // ---- the actors in path coordinates, classified
+    // ---- the actors in path coordinates, classified (projected onto the stretch of route around the car)
 
+    const double s_lo = s0 - 50.0, s_hi = s0 + opt.look_ahead + 80.0;
+    // a point beyond either end of that stretch is clamped onto the end with only its sideways offset, so a car
+    // straight behind the route's start would look in the lane at s = 0: there its distance stands in for the offset
+    auto project = [&](double x, double y) {
+        auto [s, e] = route.project(x, y, s_lo, s_hi);
+        const tc::Pose q = route.pose(s);
+        const double d = std::hypot(x - q.x, y - q.y);
+        if (d > std::fabs(e) + 0.5) e = e >= 0.0 ? d : -d;
+        return std::make_pair(s, e);
+    };
     std::vector<Track> tracks;
     for (const Actor& a : sc.actors) {
         if (a.t.empty() || a.x.size() != a.t.size() || a.y.size() != a.t.size() || a.psi.size() != a.t.size()) continue;
         Track tr;
         tr.actor = &a;
         for (size_t i = 0; i < a.t.size(); ++i) {
-            const auto [s, e] = route.project(a.x[i], a.y[i]);
+            const auto [s, e] = project(a.x[i], a.y[i]);
             const double rel = tc::wrap_angle(a.psi[i] - route.pose(s).psi);
             tr.t.push_back(a.t[i]);
             tr.s.push_back(s);
@@ -136,7 +146,7 @@ Decision Behaviour::step(const Scene& sc) {
             mv.radius = r;
             mv.growth = walker ? 0.3 : 0.1;
             for (size_t i = 0; i < a.t.size(); ++i) {
-                const auto [s, e] = route.project(a.x[i] + d * std::cos(a.psi[i]), a.y[i] + d * std::sin(a.psi[i]));
+                const auto [s, e] = project(a.x[i] + d * std::cos(a.psi[i]), a.y[i] + d * std::sin(a.psi[i]));
                 mv.t.push_back(a.t[i]);
                 mv.s.push_back(s);
                 mv.e_y.push_back(e);
