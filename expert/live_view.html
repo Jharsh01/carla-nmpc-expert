@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMPC live view</title>
+<style>
+  :root { --bg: #11151b; --panel: #181e26; --line: #2a333f; --text: #d8dee6; --dim: #8592a3;
+          --simlingo: #4ea1ff; --plan: #ffa94d; --bad: #ff5c5c; --ok: #5fd38d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  #wrap { display: flex; height: 100%; }
+  #bev { flex: 1; min-width: 0; display: block; }
+  #side { width: 340px; padding: 12px 14px; background: var(--panel); border-left: 1px solid var(--line);
+          overflow-y: auto; }
+  h2 { font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .06em;
+       margin: 16px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; justify-content: space-between; }
+  .big { font-size: 22px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 1px 0; }
+  td:not(:first-child) { text-align: right; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); }
+  canvas.chart { width: 100%; height: 140px; display: block; background: var(--bg); border: 1px solid var(--line); }
+  #notes { color: var(--dim); white-space: pre-wrap; min-height: 2em; }
+  .key span { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  @media (max-width: 760px) { #wrap { flex-direction: column; } #side { width: 100%; border-left: 0; }
+                              #bev { height: 60vh; flex: none; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="bev"></canvas>
+  <div id="side">
+    <h2>Now</h2>
+    <div class="row"><span class="big" id="speed">–</span><span class="big" id="clock">–</span></div>
+    <div class="row dim"><span id="limit">limit –</span><span id="conn">waiting for the agent…</span></div>
+    <h2>Solve</h2>
+    <div class="row"><span id="label">–</span><span id="ms">–</span></div>
+    <table id="cands"></table>
+    <h2>Speed over the plan</h2>
+    <canvas class="chart" id="speedchart"></canvas>
+    <div class="key dim"><span style="background:var(--plan)"></span>planned
+      &nbsp;<span style="background:var(--simlingo)"></span>SimLingo asked &nbsp;<span style="background:var(--dim)"></span>limit</div>
+    <h2>Solve time (last 300 plans)</h2>
+    <canvas class="chart" id="timechart"></canvas>
+    <div class="dim">dashed: 50 ms; red: failed solve</div>
+    <h2>Notes</h2>
+    <div id="notes"></div>
+    <h2>Key</h2>
+    <div class="key dim"><span style="background:var(--simlingo)"></span>SimLingo's path<br>
+      <span style="background:#6b7787"></span>lane past it (map)<br>
+      <span style="background:rgba(78,161,255,.35)"></span>corridor<br>
+      <span style="background:var(--plan)"></span>plan (green slow → red at the limit)<br>
+      scroll to zoom, drag to pan, double-click to reset</div>
+  </div>
+</div>
+<script>
+const bev = document.getElementById("bev"), ctx = bev.getContext("2d");
+let snap = null, scale = 6, pan = [0, 0], history = [];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function fit(c) {
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
+  const g = c.getContext("2d"); g.setTransform(d, 0, 0, d, 0, 0); return [r.width, r.height, g];
+}
+// the car's frame: x forward (up the screen), y left (left on the screen)
+function toScreen(W, H, x, y) { return [W / 2 + pan[0] - y * scale, H * 0.72 + pan[1] - x * scale]; }
+function line(g, W, H, pts, color, width, dash) {
+  if (!pts || pts.length < 2) return;
+  g.beginPath(); g.strokeStyle = color; g.lineWidth = width; g.setLineDash(dash || []);
+  pts.forEach((p, i) => { const [sx, sy] = toScreen(W, H, p[0], p[1]); i ? g.lineTo(sx, sy) : g.moveTo(sx, sy); });
+  g.stroke(); g.setLineDash([]);
+}
+function box(g, W, H, x, y, psi, l, w, fill, stroke) {
+  const c = Math.cos(psi), s = Math.sin(psi), pts = [[l / 2, w / 2], [l / 2, -w / 2], [-l / 2, -w / 2], [-l / 2, w / 2]]
+    .map(([a, b]) => toScreen(W, H, x + c * a - s * b, y + s * a + c * b));
+  g.beginPath(); pts.forEach(([sx, sy], i) => i ? g.lineTo(sx, sy) : g.moveTo(sx, sy)); g.closePath();
+  g.fillStyle = fill; g.fill(); if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); }
+}
+function speedColor(v, vmax) {
+  const f = Math.max(0, Math.min(1, v / Math.max(vmax, 1)));
+  return `hsl(${120 - 120 * f}, 80%, 55%)`;
+}
+
+function drawBev() {
+  const [W, H, g] = fit(bev);
+  g.fillStyle = css("--bg"); g.fillRect(0, 0, W, H);
+  g.strokeStyle = "#1c232c"; g.lineWidth = 1;
+  for (let d = -200; d <= 200; d += 10) {  // a 10 m grid
+    let [a, b] = toScreen(W, H, d, -200), [c, e] = toScreen(W, H, d, 200);
+    g.beginPath(); g.moveTo(a, b); g.lineTo(c, e); g.stroke();
+    [a, b] = toScreen(W, H, -200, d); [c, e] = toScreen(W, H, 200, d);
+    g.beginPath(); g.moveTo(a, b); g.lineTo(c, e); g.stroke();
+  }
+  if (!snap) { g.fillStyle = css("--dim"); g.fillText("waiting for the first plan…", 16, 24); return; }
+  if (snap.corridor.length > 1) {  // the band the chosen candidate planned in
+    const left = snap.corridor.map(p => p[1]), right = snap.corridor.map(p => p[0]).reverse();
+    g.beginPath(); left.concat(right).forEach((p, i) => { const [sx, sy] = toScreen(W, H, p[0], p[1]);
+      i ? g.lineTo(sx, sy) : g.moveTo(sx, sy); });
+    g.closePath(); g.fillStyle = "rgba(78,161,255,0.10)"; g.fill();
+    line(g, W, H, left, "rgba(78,161,255,0.45)", 1); line(g, W, H, right.slice().reverse(), "rgba(78,161,255,0.45)", 1);
+  }
+  line(g, W, H, snap.beyond, "#6b7787", 1.5, [6, 6]);
+  line(g, W, H, snap.simlingo, css("--simlingo"), 3);
+  for (const st of snap.stops) {  // a line across the lane
+    const c = Math.cos(st.psi), s = Math.sin(st.psi), half = 2.2;
+    const color = {red_light: "#ff5c5c", amber_light: "#ffb347", stop_sign: "#ffffff", route_end: "#5fd38d"}[st.kind] || "#fff";
+    line(g, W, H, [[st.x - s * half, st.y + c * half], [st.x + s * half, st.y - c * half]], color, 4);
+  }
+  for (const a of snap.actors) {
+    const moving = !a.parked && a.kind !== "object";
+    if (moving && a.traj.length > 1) line(g, W, H, a.traj, "rgba(255,122,89,0.6)", 1.5, [2, 4]);
+    if (a.kind === "walker") {
+      const [sx, sy] = toScreen(W, H, a.x, a.y);
+      g.beginPath(); g.arc(sx, sy, Math.max(3, 0.4 * scale), 0, 2 * Math.PI); g.fillStyle = "#e8c547"; g.fill();
+    } else {
+      box(g, W, H, a.x, a.y, a.psi, a.l, a.w, a.parked ? "#4a525d" : a.kind === "object" ? "#7d7d7d" : "#ff7a59", "#11151b");
+    }
+    const [sx, sy] = toScreen(W, H, a.x, a.y);
+    g.fillStyle = css("--dim"); g.font = "10px ui-monospace, monospace"; g.fillText(a.id, sx + 6, sy - 6);
+  }
+  for (let i = 1; i < snap.plan.length; i++) {  // the plan, coloured by its speed
+    line(g, W, H, [snap.plan[i - 1], snap.plan[i]], speedColor(snap.plan[i][2], snap.v_max), 4);
+  }
+  for (const p of snap.plan) { const [sx, sy] = toScreen(W, H, p[0], p[1]);
+    g.fillStyle = "#11151b"; g.fillRect(sx - 1.5, sy - 1.5, 3, 3); }
+  box(g, W, H, 0.0, 0.0, 0.0, 4.89, 1.84, "#e6edf5", "#11151b");  // the car
+}
+
+function chart(id, series, xmax, ymax, refs) {
+  const [W, H, g] = fit(document.getElementById(id)), m = 22;
+  g.fillStyle = css("--bg"); g.fillRect(0, 0, W, H);
+  const X = x => m + (W - m - 6) * x / xmax, Y = y => H - 14 - (H - 22) * y / ymax;
+  g.fillStyle = css("--dim"); g.font = "10px ui-monospace, monospace";
+  g.fillText(ymax.toFixed(0), 2, 12); g.fillText("0", 2, H - 14);
+  for (const r of refs || []) { g.strokeStyle = css("--dim"); g.setLineDash([4, 4]); g.beginPath();
+    g.moveTo(X(0), Y(r)); g.lineTo(X(xmax), Y(r)); g.stroke(); g.setLineDash([]); }
+  for (const [xs, ys, color, dots] of series) {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    xs.forEach((x, i) => { const px = X(x), py = Y(Math.min(ys[i], ymax)); i ? g.lineTo(px, py) : g.moveTo(px, py); });
+    g.stroke();
+    if (dots) dots.forEach(i => { g.fillStyle = css("--bad"); g.fillRect(X(xs[i]) - 2, Y(Math.min(ys[i], ymax)) - 2, 4, 4); });
+  }
+}
+
+function drawSide() {
+  if (!snap) return;
+  document.getElementById("speed").textContent = snap.v.toFixed(1) + " m/s";
+  document.getElementById("clock").textContent = "t " + snap.t.toFixed(1) + " s";
+  document.getElementById("limit").textContent = "limit " + snap.v_max.toFixed(1) + " m/s";
+  const lab = document.getElementById("label");
+  lab.textContent = snap.label + (snap.success ? "" : "  (failed)"); lab.className = snap.success ? "" : "bad";
+  document.getElementById("ms").textContent = snap.ms.toFixed(0) + " ms";
+  document.getElementById("cands").innerHTML = snap.candidates.map(c =>
+    `<tr><td class="${c[0] === snap.label ? "" : "dim"}">${c[0]}</td><td>${c[1] === null ? "–" : c[1]}</td>` +
+    `<td>${c[2].toFixed(0)} ms</td><td class="${c[3] ? "ok" : "bad"}">${c[3] ? "ok" : "fail"}</td></tr>`).join("");
+  document.getElementById("notes").textContent = snap.notes.join("\n") || "–";
+  const vmax = Math.max(snap.v_max, ...snap.plan_v, ...(snap.ref_v.length ? snap.ref_v : [0])) * 1.1;
+  chart("speedchart", [[snap.ref_t, snap.ref_v, css("--simlingo")], [snap.plan_t, snap.plan_v, css("--plan")]],
+        5, Math.max(vmax, 1), [snap.v_max]);
+  const ms = history.map(h => h[0]), fails = history.map((h, i) => h[1] ? -1 : i).filter(i => i >= 0);
+  chart("timechart", [[ms.map((_, i) => i), ms, css("--plan"), fails]], Math.max(ms.length - 1, 1),
+        Math.max(100, ...ms) * 1.05, [50]);
+}
+
+function redraw() { drawBev(); drawSide(); }
+window.addEventListener("resize", redraw);
+bev.addEventListener("wheel", e => { e.preventDefault(); scale = Math.max(1.5, Math.min(40, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); drawBev(); }, {passive: false});
+let drag = null;
+bev.addEventListener("mousedown", e => drag = [e.clientX - pan[0], e.clientY - pan[1]]);
+window.addEventListener("mouseup", () => drag = null);
+window.addEventListener("mousemove", e => { if (drag) { pan = [e.clientX - drag[0], e.clientY - drag[1]]; drawBev(); } });
+bev.addEventListener("dblclick", () => { pan = [0, 0]; scale = 6; drawBev(); });
+
+const conn = document.getElementById("conn");
+function connect() {
+  const es = new EventSource("/stream");
+  es.onopen = () => { conn.textContent = "live"; conn.className = "ok"; };
+  es.onmessage = e => {
+    const next = JSON.parse(e.data);
+    if (snap && next.t < snap.t) history = [];  // a new route
+    snap = next; history.push([snap.ms, snap.success]); if (history.length > 300) history.shift();
+    redraw();
+  };
+  es.onerror = () => { conn.textContent = "waiting for the agent…"; conn.className = "dim"; };
+}
+connect(); redraw();
+</script>
+</body>
+</html>

@@ -5,7 +5,16 @@
 - `behaviour.hpp`: classifies actors (lead, blocker, crosser, mover), builds candidate plans (yield or pass each
   crosser; stay behind a blocker or borrow the left lane), solves them in parallel and picks one. It also holds
   the traffic-rule state (stop-sign hold, red-light dilemma zone).
-- `sim/urban/scenarios.cpp` (`build/urban_scenarios`, a ctest): 11 closed-loop scenarios without CARLA.
+- `path.hpp`: the route as straights and arcs, fitted through waypoints (biarcs), with projection (windowed for
+  long routes), pose and curvature at s. Tested by `tests/test_path.cpp`.
+- `vehicle_params.hpp`: the MKZ's parameters the NMPC plans with (`config/vehicles/mkz2020.json`,
+  `docs/vehicle_parameters.md`); `body.hpp`: its body size.
+- `integrate.hpp`: the RK4 step the NMPC discretises its model with.
+- `sim/urban/scenarios.cpp` (`build/urban_scenarios`, a ctest): 11 closed-loop scenarios without CARLA, on a
+  kinematic plant with lags on acceleration and steering, each run twice: along the scenario's road, and as
+  `<name>@local` along a SimLingo-like local path rebuilt every plan (`Behaviour::set_route`).
+- The route can change every plan (`set_route`): SimLingo's path is the route in CARLA. The previous plan is
+  carried into the new route's coordinates through the world frame, so the warm start survives.
 
 ## Why it is built this way
 
@@ -23,6 +32,7 @@ Each point below came from a failing scenario.
 | Candidates scored on outcomes, not on the NMPC's cost | With tapered speeds, waiting behind a blocker costs almost nothing, so the overtake was never chosen. |
 | Blockers kept until passed, and overtakes committed | Otherwise the borrow candidate vanished mid-overtake and the car cut back into the parked car. |
 | The corridor merges back from where the car is | Otherwise ending an overtake meant an instant jump back into the lane, at 7 m/s² lateral. |
+| A parked car or object blocks the lane only if it reaches 0.3 m into it (`blocker_overlap`) | On a SimLingo-like path, which wobbles, a van parked beside the lane tilted 0.03 rad against the path and its box grazed the lane by 2 cm: the car stopped behind it for good (`pedestrian_behind_van@local`). The same mechanism is the suspect for Bench2Drive route 0's blockers. |
 | Wait 4 m further back behind blockers | From 1 m behind, a kinematic car can only pull out at full lock. |
 | JIT with an on-disk cache (`jit`, `cache_dir`) | Half the time per iteration (about 27 → 10 ms a solve), but compiling takes over a minute. The compiled solver is saved with its binary and loaded in later processes in 0.3 s. |
 

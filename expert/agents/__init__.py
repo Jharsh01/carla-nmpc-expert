@@ -1,1 +1,1 @@
-"""Leaderboard agents: the expert (Mode A) and SimLingo with the NMPC (Mode B)."""
+"""Leaderboard agents: SimLingo through the urban NMPC (simlingo_nmpc_agent.py)."""

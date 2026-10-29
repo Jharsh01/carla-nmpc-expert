@@ -64,6 +64,11 @@ void Behaviour::reset() {
     m.seen.clear();
 }
 
+void Behaviour::set_route(Path next, Pose old_frame) {
+    for (auto& n : impl_->pool) n->set_route(next, old_frame);
+    route = std::move(next);
+}
+
 Decision Behaviour::step(const Scene& sc) {
     Impl& m = *impl_;
     const auto start = std::chrono::steady_clock::now();
@@ -93,7 +98,7 @@ Decision Behaviour::step(const Scene& sc) {
     // straight behind the route's start would look in the lane at s = 0: there its distance stands in for the offset
     auto project = [&](double x, double y) {
         auto [s, e] = route.project(x, y, s_lo, s_hi);
-        const tc::Pose q = route.pose(s);
+        const Pose q = route.pose(s);
         const double d = std::hypot(x - q.x, y - q.y);
         if (d > std::fabs(e) + 0.5) e = e >= 0.0 ? d : -d;
         return std::make_pair(s, e);
@@ -105,7 +110,7 @@ Decision Behaviour::step(const Scene& sc) {
         tr.actor = &a;
         for (size_t i = 0; i < a.t.size(); ++i) {
             const auto [s, e] = project(a.x[i], a.y[i]);
-            const double rel = tc::wrap_angle(a.psi[i] - route.pose(s).psi);
+            const double rel = wrap_angle(a.psi[i] - route.pose(s).psi);
             tr.t.push_back(a.t[i]);
             tr.s.push_back(s);
             tr.e.push_back(e);
@@ -138,13 +143,15 @@ Decision Behaviour::step(const Scene& sc) {
     auto add_movers = [&](const Track& tr, std::vector<Mover>& into) {
         const Actor& a = *tr.actor;
         const bool walker = a.kind == Actor::walker;
+        const bool still = a.kind == Actor::object || a.parked;
         const int n = a.length > 3.0 ? 3 : 1;
         const double r = n == 3 ? std::hypot(a.length / 6.0, 0.5 * a.width) : 0.5 * std::max(a.length, a.width);
         for (int c = 0; c < n; ++c) {
             const double d = n == 1 ? 0.0 : (c - 1) * a.length / 3.0;
             Mover mv;
             mv.radius = r;
-            mv.growth = walker ? 0.3 : 0.1;
+            mv.growth = still ? 0.0 : walker ? 0.3 : 0.1;
+            if (still) mv.margin = opt.static_margin;
             for (size_t i = 0; i < a.t.size(); ++i) {
                 const auto [s, e] = project(a.x[i] + d * std::cos(a.psi[i]), a.y[i] + d * std::sin(a.psi[i]));
                 mv.t.push_back(a.t[i]);
@@ -161,11 +168,12 @@ Decision Behaviour::step(const Scene& sc) {
         const bool aligned = tr.cos_rel > 0.5, opposed = tr.cos_rel < -0.5;
         const bool crossing_kind = a.kind == Actor::walker || (!aligned && !opposed);
         const bool ahead_now = tr.s[0] - tr.ext_s[0] > front0 - 0.5;
-        const bool in_now = in_lane(tr.s[0], tr.e[0], tr.ext_e[0]);
+        const double reach = a.kind == Actor::object || a.parked ? opt.blocker_overlap : 0.0;  // into the lane
+        const bool in_now = in_lane(tr.s[0], tr.e[0], tr.ext_e[0] - reach);
         // the samples in the lane, not all behind the car
         std::vector<size_t> inside;
         for (size_t i = 0; i < n; ++i)
-            if (in_lane(tr.s[i], tr.e[i], tr.ext_e[i]) && tr.s[i] + tr.ext_s[i] > rear0) inside.push_back(i);
+            if (in_lane(tr.s[i], tr.e[i], tr.ext_e[i] - reach) && tr.s[i] + tr.ext_s[i] > rear0) inside.push_back(i);
 
         if ((a.kind == Actor::object || a.parked) && in_now && tr.s[0] + tr.ext_s[0] > rear0 - 3.0) {  // until passed
             blockers.push_back({tr.s[0] - tr.ext_s[0], tr.s[0] + tr.ext_s[0]});

@@ -1,199 +1,106 @@
-# Plan: expert NMPC for Bench2Drive, in its own repo (SimLingo + perception-estimable privileged info)
+# Plan: SimLingo + urban NMPC + a perception stand-in, on Bench2Drive
 
-## Context
+## Goal
 
-`carla-track-control` has grown two things that don't belong together: a race-track NMPC with a pure-pursuit fallback (`track_control/`, `sim/racetrack/`), and a SimLingo/Bench2Drive harness (`scripts/install_simlingo.sh`, `run_bench2drive.sh`, `simlingo.patch`). SimLingo drives Bench2Drive with a hand-tuned PID (`agent_simlingo.py::control_pid`). PDM-Lite (`external/simlingo/team_code/autopilot.py`) is the rule-based privileged expert the field uses to generate data. It uses IDM for speed, PID on a fixed route for steering and hard-coded route shifts for overtaking.
+SimLingo drives Bench2Drive with a hand-tuned PID (`agent_simlingo.py::control_pid`). Here its path and speed
+waypoints become the reference of an urban NMPC instead. What the car may not hit, and the rules it must obey, come
+from a world model, and they enter the NMPC as constraints acting as a safety filter. The stack has three parts:
 
-**Goal:** a new repo with one NMPC core and two front ends:
-- **Mode A, expert:** privileged-only, a drop-in replacement for PDM-Lite. It must score higher than PDM-Lite on Bench2Drive, and it doubles as a data generator.
-- **Mode B, SimLingo + NMPC:** SimLingo's path and speed waypoints become the NMPC's reference, replacing its PID. Privileged info enters only as constraints that act as a safety filter.
+```
+SimLingo (camera)  ──  reference: path e_ref(s), speed v_ref(t)  ──┐
+World model (privileged, perception-shaped)  ──  Scene  ──────────┼──>  behaviour layer + urban NMPC  ──>  MKZ actuation
+```
 
-**The rule for privileged info:** the expert may only use what a perception stack on Bench2Drive's sensor suite could estimate. That means actors visible to sensors within range, the current state of lights and signs, and the map. It never uses other agents' intentions, scenario triggers, occluded actors or future light phases. Every input goes through one `WorldModel` interface, so a learned perception stack can replace it later.
+**The rule for privileged info:** the world model may only give what a perception stack on Bench2Drive's sensor
+suite could estimate. That means actors visible to sensors within range, the current state of lights and signs, and
+the map. It never gives other agents' intentions, scenario triggers, occluded actors or future light phases. All of
+it goes through one `Scene`, so a learned perception model can replace the privileged source later.
 
-Decisions already made: fresh repo with the code copied in (not filter-repo); the C++ CasADi/FATROP NMPC through pybind, built for the Python 3.8 SimLingo venv; both modes.
-
----
-
-## Phase 0: bootstrap the repo (`~/carla-expert-nmpc`)
-
-1. Commit or stash the current uncommitted work in `carla-track-control` first. The copy is taken from that state, and its commit hash goes in `PROVENANCE.md`.
-2. Copy the following, then prune:
-   - `track_control/` keeps its whole layout: `nmpc`, `pure_pursuit`, `path`, `model/`, `directive`, the tests and the CMake package. It stays namespace `tc`.
-   - `sim/plant/bicycle_plant.{hpp,cpp}`, `filters.hpp` and `interface.hpp` are for offline closed-loop tests. Chrono and the race track are dropped.
-   - `sim/racetrack/fallback_control.{hpp,cpp}` keeps the NMPC→pure-pursuit blend and the plan-following fallback. It is renamed `core/fallback`.
-   - `carla_bridge/frames.py` is for the CARLA left-handed ↔ `tc` right-handed conversion. `actuation.py` is the base of the inverse throttle/brake map.
-   - `scripts/env.sh`, `install_carla.sh`, `start_carla.sh`, `install_simlingo.sh`, `run_bench2drive.sh` and `simlingo.patch`.
-   - `docs/nmpc_pure_pursuit_derivations.pdf` and `nmpc_solve_time.pdf` go in as references.
-   - `bindings/trackctl.cpp` is rewritten as a smaller module, `expertctl` (see Phase 2).
-3. Layout:
-   ```
-   core/            C++: track_control (copied) + new urban OCP, corridor, prediction, behaviour
-   bindings/        pybind11 module expertctl (built against simlingo_venv's Python 3.8)
-   expert/          Python: world_model/, reference.py, behaviour.py, actuation.py, agents/
-     agents/expert_agent.py         Mode A, a leaderboard AutonomousAgent (MAP track)
-     agents/simlingo_nmpc_agent.py  Mode B, subclasses LingoAgent and overrides control_pid
-   sim/             offline bicycle plant + scripted urban scenarios (C++), as scenarios/ did for corners
-   scripts/         install, run_bench2drive.sh --agent {simlingo,expert,simlingo_nmpc,pdm_lite}
-   tests/           pytest (fake carla from tests/fake_carla/carla.py), ctest
-   docs/
-   ```
-4. CI: ctest plus pytest with the fake `carla` module (reuse the `.github/workflows/ci.yml` pattern).
-
-**Exit:** `cmake --build` and the copied ctest pass; `python -c "import expertctl"` works inside `external/simlingo_venv`.
+**Success:** SimLingo + NMPC's Bench2Drive driving score is at least SimLingo + PID's, with fewer collisions, and
+the NMPC's overrides of SimLingo's reference are logged and counted.
 
 ---
 
-## Phase 1: the world model (privileged info, perception-shaped)
-
-`expert/world_model/` turns CARLA ground truth into a `Scene` in exactly the form a perception stack would produce. Each field records its source and the perception stand-in it represents:
+## 1. The world model (`expert/world_model/`, built)
 
 | Scene field | CARLA source (privileged) | What would estimate it | Realism filter |
 |---|---|---|---|
-| ego pose, v, a, yaw rate | `get_transform/velocity/acceleration` | GNSS+IMU+speedometer in B2D's suite, with a UKF (SimLingo already has one) | optional noise and latency |
-| route | leaderboard global plan (given to every agent) | the same | none |
-| lanes: centre, boundaries, width, lane-change permission, junction areas, stop lines | `CarlaDataProvider.get_map()` waypoints / OpenDRIVE | HD map (Leaderboard MAP track) or online mapping (MapTR-like) | local window only, about 80 m |
-| vehicles, bikes, pedestrians: box, pose, velocity, class, flags (emergency, parked, door open) | `world.get_actors()` | 3D detection + tracking | **visible only**: in range (≤ 50 m), in a sensor FOV, ≥ N lidar points or unoccluded ray (the same approach as carla_garage's visibility check); velocity from finite differences of tracked boxes, not `get_velocity` |
-| static obstacles: cones, warning triangles, accident debris | props among `get_actors()` | detection | same visibility filter |
-| traffic light affecting ego lane: state, stop line | `ego.get_traffic_light()`, trigger volumes | TL detector + map association | current state only, no timers or phase prediction |
-| stop signs, speed limit | map landmarks / sign actors | sign detection + map | in range |
+| the car's pose | `hero.get_transform()`: only to report the rest in the car's frame | a sensor on the car (detections come car-relative) or HD-map localisation | none |
+| route | none: SimLingo's predicted path (section 4); only the route's end from the leaderboard's sparse plan | — | — |
+| lanes: band, left lane, oncoming, borrowable; stop lines | `CarlaDataProvider.get_map()` waypoints | HD map or online mapping | local window |
+| vehicles, bikes, pedestrians: box, pose, velocity, parked | `world.get_actors()` | 3D detection + tracking | in range (60 m, walkers 40 m), line of sight by ray casts; velocity from tracked boxes |
+| static obstacles: cones, warning triangles, debris | props among `get_actors()` | detection | same visibility filter |
+| traffic light for the ego lane, stop signs | `ego.get_traffic_light()`, trigger volumes | TL / sign detection + map | current state only |
 
-**Forbidden, and enforced by the interface rather than by convention:** Traffic Manager targets and routes, scenario trigger data, future light phases, actors that fail the visibility check, and `get_control()` of other actors.
+Prediction: vehicles along their lane (map), everything else at constant velocity. Still to do: junction-branch
+hypotheses, emergency vehicles, and a noise/degradation config (position σ, velocity σ, drop rate, latency) for
+ablations.
 
-Pieces:
-- `Scene` dataclass, plus `PrivilegedSource` (CARLA) and later a `PerceptionSource` (learned) behind the same interface.
-- A noise/degradation config: position σ, velocity σ, detection drop rate, latency, range. This is for ablations.
-- Prediction (C++, `core/prediction`): each actor is predicted over the horizon with uncertainty growing in time:
-  - vehicles: lane-following (map-matched, constant velocity along their lane, every successor branch kept at a junction);
-  - walkers and bikes: constant velocity;
-  - parked actors: static.
+## 2. The urban NMPC and the behaviour layer (`core/urban/`, built)
 
----
+A kinematic bicycle in the route's path coordinates, with soft constraints for the corridor, movers, leads,
+stop/pass gates, grip and headway (CasADi + FATROP). The behaviour layer classifies actors, builds 1–3 candidate
+plans (yield or pass each crosser; stay behind or borrow the left lane), solves them in parallel and picks one. It
+also holds the traffic-rule state. The design reasons are in `core/urban/README.md`; 11 offline scenarios
+(`build/urban_scenarios`) cover it without CARLA.
 
-## Phase 2: NMPC redesign for urban driving (`core/urban_nmpc`)
+Still to do: a fallback for a late or failed solve (follow the last plan, then brake at the friction limit);
+start new candidates from the chosen plan to cut cold-start solve times.
 
-The track NMPC (`track_control/src/nmpc.cpp`) is built for racing: a dynamic bicycle with tyre slip, Frenet coordinates on a closed path, and 2 ellipse obstacles. Bench2Drive needs stop-and-go, rules and interaction. What is reused: the cost/constraint term tables, the Directive mechanism (`directive.hpp`, `NMPC::interpret`), variable steps, the FATROP warm start, `Path::from_waypoints` and the pure-pursuit fallback.
+## 3. CARLA integration (`expert/agents/simlingo_nmpc_agent.py`: plans at 10 Hz, controls at 20 Hz, logs each tick)
 
-**Model.** Kinematic bicycle in Frenet coordinates along the route reference:
-- state `[s, e_y, e_psi, v, a, delta]`, inputs `[jerk, delta_rate]`;
-- `v ≥ 0` hard, so it is well posed at standstill, which the dynamic model's slip angles are not;
-- grip enters as a friction-ellipse constraint `a² + (v² κ_eff)² ≤ (μ g)²`, where `κ_eff` is the path curvature plus the lateral term;
-- horizon 5 s at 0.1 s steps (0.05 s for the first 0.3 s); solved at 10 Hz and played at CARLA's 20 Hz.
+- `scripts/identify_ego.py` → `config/vehicles/mkz2020_actuation.json`; `expert/mkz_actuation.py` maps the planned
+  acceleration and steering angle to throttle, brake and steer (table inverse + PI).
 
-**Constraints**, each a new entry in the term tables:
-1. **Corridor:** `e_min(s) ≤ e_y ± half-width ≤ e_max(s)`, built per solve from the lane boundaries. The behaviour layer can widen it into an adjacent lane, or the opposite lane for the *TwoWays* scenarios. Soft, with a large slack weight.
-2. **Leading vehicle (same lane):** `s_k ≤ s_lead(t_k) − d0 − T_h v_k` (time headway).
-3. **Crossing conflicts** (pedestrian crossing, junction traffic, cut-ins): for each predicted actor path that crosses the corridor at `s_c` during `[t_in, t_out]`, apply either *yield* (`s_k ≤ s_c − margin` for `t_k ∈ window`) or *pass* (`s_k ≥ s_c + margin` by `t_in`). The behaviour layer chooses which.
-4. **Lateral obstacles** (parked cars, cones, open doors): oriented boxes projected into Frenet coordinates, covered by circles; soft.
-5. **Stops:** red or amber light, a stop sign (stop for at least the hold time, then release), a blocked junction (don't enter unless the exit is clear). Applied as `s_k ≤ s_stop`.
-6. **Speed:** the map or sign limit, a curvature limit and a comfort band: `|a| ≤ 3`, `|jerk| ≤ 5`, `|lateral a| ≤ 3` (tunable).
+## 4. SimLingo in the loop (`expert/agents/simlingo_nmpc_agent.py`, built, first runs pending)
 
-**Cost:**
-- track `v_ref` (Mode A: the speed limit. Mode B: SimLingo's speed waypoints, below);
-- track `e_ref` (the lane centre, or the nudge or lane-change target);
-- penalties on jerk, steering rate and slack;
-- a progress term, to avoid Bench2Drive's min-speed infractions and blocked-agent timeouts.
+- `LingoAgent` subclassed, `control_pid` overridden: SimLingo still predicts every tick; the NMPC replaces its PID.
+- **The route is SimLingo's** (`expert/simlingo_ref.py`). Its 20 path points (about 1 m apart) become the NMPC's
+  `Path` as they are, in the car's frame, rebuilt at every plan. The Scene's line is that path.
+- **The NMPC plans in the car's frame**: the car at the origin, no global position. `Behaviour::set_route` carries
+  the previous plan into the new frame, given the old frame's pose in the new one, from odometry (speedometer and
+  compass, `simlingo_ref.Odometry`). The world model reports its actors, lanes and stops in the car's frame
+  (`frames.Frame`, from the car's true pose: the stand-in for sensors on the car). An earlier version placed the
+  path in the world by SimLingo's own GNSS/UKF pose; on Town12 that was 497.6 m off CARLA's frame, since SimLingo
+  estimates its GNSS reference itself.
+- Past SimLingo's last point the path goes on along the lane that point is in, for 160 m (`world_model/route.py`):
+  the behaviour layer looks for actors and stops that far, and on a straight continuation a bend's lane, a lead in
+  the bend and the bend's speed are all wrong (`curve@local` drifted 0.54 m that way). Only SimLingo's part is
+  asked to be followed.
+- `pred_speed_wps` (0.25 s apart) become `v_ref(t)`, capped by the limit and the world model's constraints.
+- The car's state: what it measures: the speedometer, the IMU's forward acceleration, the steering it commanded.
+- The world model's constraints stay hard. The log keeps, at each plan, how far the plan departs from SimLingo's
+  path over its first 2 s and from its speed at 1 s (`override`).
+- SimLingo's restart creep (forced throttle after a long stop) is off: the NMPC decides when to move.
+- Offline, every scenario also runs as `<name>@local` on SimLingo-like local paths (`sim/urban/scenarios.cpp`).
+- Later: with CoT on, SimLingo's commentary may steer the behaviour layer (e.g. which candidate to prefer).
 
-**Behaviour layer** (`core/behaviour`, the part PDM-Lite does with rules). Each tick it lists 1–4 candidate *homotopies*:
-- keep lane and follow;
-- nudge within the lane;
-- borrow the adjacent or opposite lane, only if the gap in visible oncoming traffic covers the manoeuvre time plus a margin;
-- for each crossing conflict, yield or pass;
-- creep (a low `v_max` with an extended stop line) for occluded junctions and pedestrians at parked cars.
+## 5. Evaluation
 
-Each candidate is a separate NMPC instance solved in parallel (one thread each, warm-started from its own last plan). The plan chosen is the lowest-cost feasible one. Traffic rules are hard filters, and switching between homotopies has hysteresis.
+- Baseline: SimLingo + PID on the same machine, seeds and routes (`run_bench2drive.sh --agent simlingo`).
+- Dev set: one route per scenario type, about 44 routes. The full 220 only at milestones, on 3 seeds. Several
+  routes run side by side through `scripts/b2d_evaluator.py` (port ranges per job); `scripts/summarize_b2d.py`
+  scores a folder of routes and `scripts/route_report.py` maps one.
+- Metrics: driving score and success rate, multi-ability scores, infractions by type, solve times, and override
+  and fallback rates.
+- Perception ablations: no visibility filter (upper bound), then the filter, then noise, latency and drops.
 
-**Execution:** the same handover as now, using `FallbackControl`:
-- a late or failed solve hands over to pure pursuit following the last plan;
-- if no candidate is feasible, it brakes (emergency stop at the friction limit).
+## Milestones
 
-**Bindings (`expertctl`):** `UrbanNMPC`, `Scene` structs, `Behaviour.step(scene) → plan, inputs, debug`, and the directive API.
-
-**Offline tests** (`sim/`, with the bicycle plant): a scripted C++ scenario per behaviour, run without CARLA in about 1 s each:
-- lead car braking hard;
-- cut-in;
-- pedestrian crossing from behind a parked car;
-- red light then green;
-- stop sign;
-- parked car needing the opposite lane, with oncoming traffic;
-- unprotected left turn with oncoming flow.
-
-Each test asserts no collision, the stop line respected, comfort limits held and solve time p95 < 50 ms.
-
----
-
-## Phase 3: CARLA integration and actuation
-
-1. **Identify the Bench2Drive ego** (`vehicle.lincoln.mkz_2020`):
-   - collect throttle/brake → longitudinal acceleration as a function of speed, and steer → road-wheel angle;
-   - script: `scripts/identify_ego.py`, built on the approach of `scripts/fit_chrono_tires.py`;
-   - fit the maps used by `expert/actuation.py`.
-2. **Inner loop at 20 Hz:** the inverse map from the planned `a` plus PI on acceleration error gives throttle/brake. The planned `delta` interpolated at the current time gives steer. This replaces SimLingo's PID in Mode B too.
-3. **Mode A agent** (`expert_agent.py`):
-   - sensors: the minimal B2D set (GNSS/IMU/speed), plus one camera for video only;
-   - each step: `PrivilegedSource → Scene → Behaviour → NMPC → actuation`;
-   - logs per step: Scene, chosen homotopy, plan and solve stats, as JSON lines alongside the leaderboard's `metric_info`.
-4. **Mode B agent** (`simlingo_nmpc_agent.py`):
-   - subclass `LingoAgent` and override `control_pid`;
-   - `pred_route` (spatial path, ego frame) becomes `e_ref(s)` relative to the map route. If SimLingo deviates (a nudge or lane change), the corridor follows it within map-legal lanes;
-   - `pred_speed_wps` (0.25 s apart) becomes `v_ref(t)`;
-   - SimLingo's commentary, with CoT on, maps to `Intent`s through `NMPC::interpret`;
-   - privileged constraints stay hard. When SimLingo's reference violates one, the NMPC overrides it and logs an `override` event, which measures how often SimLingo would have crashed;
-   - SimLingo runs at its own rate (about 0.4 s per step with `--fast`); the NMPC keeps solving at 10 Hz on the latest reference.
-5. `run_bench2drive.sh --agent {simlingo, simlingo_nmpc, expert, pdm_lite}` with separate result folders. Allow N parallel CARLA servers (ports 20000 + 100 k) to cut a full run from days to hours.
-
----
-
-## Phase 4: evaluation (beating PDM-Lite)
-
-- **Baselines on the same machine, seeds and routes:**
-  - PDM-Lite (the autopilot from carla_garage / SimLingo's `team_code/autopilot.py`, behind a thin agent wrapper);
-  - SimLingo + PID: the existing results in `results/bench2drive/simlingo-nocot-fast/` cover 23 routes, so extend them to 220.
-- **Dev set:** one route per scenario type, about 44 routes, which takes hours rather than days. It is the iteration loop. The full 220 run happens only at milestones, on 3 seeds.
-- **Metrics:**
-  - Bench2Drive DS and SR;
-  - multi-ability scores (merging, overtaking, emergency brake, give way, traffic signs);
-  - efficiency and comfort (B2D's smoothness metrics);
-  - infraction counts by type;
-  - solve-time distribution;
-  - fallback and override rates.
-- `scripts/summarize_b2d.py`: per-scenario comparison tables (expert vs PDM-Lite vs SimLingo vs SimLingo+NMPC), extending `results/bench2drive/bench2drive_routes.csv`.
-- **Perception-realism ablations** of the expert:
-  - GT with no visibility filter (an upper bound), then the visibility filter;
-  - plus noise, plus 100 ms latency, plus 10% detection drops.
-
-  These show how much of the expert's gain survives a realistic perception stack, which is the case for "estimable".
-
-**Success criteria:**
-1. The expert's DS beats PDM-Lite's on the full 220 routes, mean of 3 seeds, with the visibility filter on.
-2. SimLingo+NMPC's DS is at least SimLingo+PID's, with fewer collision infractions.
-
----
-
-## Milestones (order of work)
-
-| # | Deliverable | Exit check |
+| # | Deliverable | State |
 |---|---|---|
-| M0 | Repo bootstrapped, builds in the py3.8 venv | ctest + `import expertctl` |
-| M1 | Urban NMPC + offline scenario suite | all 7 offline scenarios pass, p95 solve < 50 ms |
-| M2 | WorldModel + actuation identified, Mode A drives an empty route | lane keeping in CARLA, \|e_y\| < 0.3 m, smooth stops at lights |
-| M3 | Behaviour layer (homotopies) + all constraint types | dev set: no collision on static and cut-in scenarios |
-| M4 | PDM-Lite baseline + expert on the dev set, iterate | expert ≥ PDM-Lite on the dev set |
-| M5 | Mode B (SimLingo + NMPC) | dev-set DS ≥ SimLingo+PID |
-| M6 | Full 220 × 3 seeds, all four agents + perception ablations | criteria above, report in `docs/` |
+| M0 | Repo bootstrapped, builds in the Python 3.8 venv | done |
+| M1 | Urban NMPC, behaviour layer, offline scenarios | done |
+| M2 | World model + MKZ actuation | done (`docs/STATUS.md`) |
+| M3 | SimLingo + NMPC agent | built; first Bench2Drive runs (`docs/STATUS.md`) |
+| M4 | Dev set: SimLingo + NMPC ≥ SimLingo + PID; iterate | not started |
+| M5 | Full 220 × 3 seeds, perception ablations, report | not started |
 
-## Risks and mitigations
+## Risks
 
-- **Mixed-integer interaction** (yield vs pass, lane borrowing) makes a single NLP non-convex. The parallel homotopy candidates keep each NLP local. Plan for about 4 cores per agent.
-- **Low-speed and standstill solves.** The kinematic model with `v ≥ 0` covers this. Add a dedicated "hold" mode at `v < 0.5` with a stop target, to skip solves.
-- **Solve time with many obstacles.** Fixed slot counts as now (pad unused slots far away), with the K nearest by time-to-conflict. Measure using the `SolveStats` pattern.
-- **Python 3.8 + CasADi wheel ABI.** Keep `TRACK_CONTROL_OLD_CXX_ABI=ON` as now, and pin `casadi<3.8` in the venv.
-- **Min-speed infractions and timeouts** from over-caution. The progress term, the creep mode, and tuning against B2D's efficiency metric.
-
-## Verification
-
-- `ctest --test-dir build` (copied model/path/controller tests, plus the new urban OCP unit tests and the offline scenarios).
-- `pytest` with the fake `carla` module: Scene extraction, the visibility filter, frames, actuation maps and the agents' `run_step` plumbing.
-- In CARLA:
-  - `scripts/run_bench2drive.sh --agent expert --routes <dev set> --debug` produces videos with the plan, corridor and constraints overlaid;
-  - `--agent simlingo_nmpc` does the same for Mode B;
-  - `scripts/summarize_b2d.py` gives the comparison table against PDM-Lite and SimLingo+PID.
+- **Mixed-integer interaction** (yield or pass, lane borrowing): handled by parallel candidates, each a local NLP.
+  Plan for about 4 cores per agent.
+- **Solve time with many actors**: fixed slot counts, the nearest by time to conflict.
+- **SimLingo's reference fighting the constraints** (e.g. it asks to go through a red light): the override log
+  shows it. If overrides are frequent, the reference may need filtering before the NMPC sees it.
+- **Python 3.8 + the CasADi wheel's ABI**: keep `_GLIBCXX_USE_CXX11_ABI=0` (top-level `CMakeLists.txt`) and pin CasADi 3.7.

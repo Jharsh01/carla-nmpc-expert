@@ -19,7 +19,7 @@ def test_path_through_waypoints():
 
 
 def test_vehicle_params_from_file():
-    p = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "model3.json"))
+    p = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
     assert p.m > 1000.0 and p.L() > 2.0
 
 
@@ -38,7 +38,7 @@ def test_state_from_carla_moves_the_origin_to_the_cg():
 def test_urban_nmpc_stops_at_a_gate():
     """A stop line 50 m ahead at 12 m/s: the plan brakes and its front stays behind the line."""
     route = expertctl.Path.from_waypoints([[0.0, 0.0], [400.0, 0.0]], False)
-    params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "model3.json"))
+    params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
     options = expertctl.UrbanOptions()
     options.horizon = 8.0  # long enough to plan to standstill
     nmpc = expertctl.UrbanNMPC(route, params, expertctl.Body(), options)

@@ -7,7 +7,7 @@
 //     e_psi' = v cos(beta) tan(delta) / L - kappa s'
 //     v' = a,  a' = jerk,  delta' = delta_rate
 //
-// Unlike the race-track NMPC (track_control/nmpc.hpp) there are no tire slip angles, so the model holds down to
+// There are no tire slip angles, so the model holds down to
 // standstill (v >= 0 is a bound), which stop-and-go traffic needs; grip enters as a friction circle on the planned
 // longitudinal and lateral accelerations instead.
 //
@@ -26,24 +26,21 @@
 // behaviour layer's decision, not the NMPC's.
 //
 // The steps need not be equal (h_fine for the first `fine` seconds, h after), and each solve starts from the
-// previous plan shifted forward by the time since, as in track_control's NMPC.
+// previous plan shifted forward by the time since.
 #pragma once
 
 #include <Eigen/Dense>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "track_control/controller.hpp"
-#include "track_control/path.hpp"
-#include "track_control/vehicle_params.hpp"
+#include "urban/body.hpp"
+#include "urban/path.hpp"
+#include "urban/vehicle_params.hpp"
 
 namespace ex {
-
-using tc::Body;
-using tc::Path;
-using tc::VehicleParams;
 
 constexpr double INF = std::numeric_limits<double>::infinity();
 constexpr int NX = 6;
@@ -51,7 +48,7 @@ constexpr int NU = 2;
 enum StateIndex { IS, IE, IPSI, IV, IA, IDELTA };
 enum InputIndex { IJERK, IRATE };
 
-// The ego car as measured, in the library's world frame (track_control/types.hpp) at the centre of gravity.
+// The ego car as measured, in a right-handed world frame (heading counter-clockwise) at the centre of gravity.
 struct Ego {
     double x = 0.0, y = 0.0, psi = 0.0;  // [m], [rad]
     double v = 0.0;  // speed [m/s]
@@ -72,6 +69,7 @@ struct Mover {
     std::vector<double> t, s, e_y;  // [s], [m], [m]
     double radius = 1.0;  // [m]
     double growth = 0.0;  // the radius grows by this much per second of prediction [m/s]
+    double margin = NAN;  // clearance kept to it [m]; NaN: Options::margin
 };
 
 // A car ahead in the lane: where its rear is along the route at times t (its speed is taken from these).
@@ -138,8 +136,8 @@ public:
         // and in bends to the speed that takes them at this lateral acceleration (grip allows more, comfort less)
         double a_lat_ref = 3.0;  // [m/s^2]
         double a_max = 3.0;  // [m/s^2]
-        // The strongest braking [m/s^2]; NaN: min(F_brake_max / m, mu g). CARLA's cars brake at about 8 m/s^2 on
-        // dry asphalt, more than the race-track Model 3 parameters' brake force gives.
+        // The strongest braking [m/s^2]; NaN: min(F_brake_max / m, mu g). The MKZ brakes at about 7.7 m/s^2 on dry
+        // asphalt (docs/vehicle_parameters.md); this keeps a margin below it.
         double a_min = -7.0;
         double jerk_max = 15.0;  // [m/s^3]
         double mu = 0.9;  // friction the plans may use
@@ -172,6 +170,12 @@ public:
 
     Plan solve(const Problem& problem);
     void reset();  // forget the previous plan: the next solve starts cold
+    // Plan along another route from now on (a new path from SimLingo each update), given in a frame that may differ
+    // from the old route's: `old_frame` is where the old frame's origin and x axis are in the new one (identity: the
+    // same frame; for routes in the car's frame, where the car was at the last plan as seen from where it is now).
+    // The previous plan, kept to start the next solve from, is carried over into the new route's coordinates. The
+    // route should reach as far as the horizon goes, and a little behind the car.
+    void set_route(Path route, Pose old_frame = {0.0, 0.0, 0.0});
 
     // The ego's path state [s, e_y, e_psi, v, a, delta] for a measurement: projected onto the route near where it
     // was last (the whole route the first time and after reset()).
@@ -179,7 +183,7 @@ public:
     // Names of the constraint groups, in the order of Plan::slack_max.
     static const std::vector<std::string>& groups();
 
-    const Path route;
+    Path route;  // set_route() changes it
     const VehicleParams p;
     const Body body;
     const Options opt;

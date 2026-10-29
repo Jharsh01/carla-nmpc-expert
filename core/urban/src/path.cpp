@@ -1,11 +1,11 @@
-#include "track_control/path.hpp"
+#include "urban/path.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
-namespace tc {
+namespace ex {
 
 double pymod(double a, double b) {
     const double r = std::fmod(a, b);
@@ -253,4 +253,4 @@ double Path::offset_to_s(double distance, double e_y) const {
     return interp(closed_ ? pymod(distance, c.back()) : distance, c, seg_s_);
 }
 
-}  // namespace tc
+}  // namespace ex

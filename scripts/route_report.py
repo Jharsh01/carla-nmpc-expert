@@ -2,7 +2,7 @@
 
     python scripts/route_report.py <run dir> <route xml>
 
-<run dir> holds steps.csv, route.json and frames/ (expert/agents/pdm_lite_agent.py) and result.json (the
+<run dir> holds steps.csv, route.json and frames/ (written by the agent) and result.json (the
 leaderboard's checkpoint). Writes map.png (the map's lanes, the planned route, the path driven coloured by speed,
 the scenario's trigger and the infractions), video.mp4 (the frames at real time) and summary.md.
 """
