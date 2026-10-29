@@ -1,7 +1,7 @@
 # To do
 
 Open work, most pressing first. When a task is done, delete it here and, if it taught something, add that to
-[learnings.md](learnings.md). Last updated 29 October 2026, at commit b341365.
+[learnings.md](learnings.md). Last updated 29 October 2026, at commit a53284d on main.
 
 ## Now: get route 0 driving
 
@@ -35,11 +35,10 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
 11. **Look at the live view in a browser** (`--live`, `ssh -L 8765:localhost:8765`): its drawing code has never run.
 12. **`docs/STATUS.md` is stale** (it predates the SimLingo agent). Fold what it still holds into this file and
     learnings.md, or update it.
-13. **Merge `narrow-to-simlingo-nmpc` into `main`** when ready (all work since d320b04 is on it).
 
 ## Later
 
-14. World model: pedestrians beyond constant velocity; junction-branch hypotheses for vehicles; emergency vehicles
+13. World model: pedestrians beyond constant velocity; junction-branch hypotheses for vehicles; emergency vehicles
     (YieldToEmergencyVehicle); right-side nudging.
-15. With CoT on, let SimLingo's commentary steer the behaviour layer (which candidate to prefer).
-16. Perception ablations: the visibility filter off, then noise, latency, drops (plan, section 5).
+14. With CoT on, let SimLingo's commentary steer the behaviour layer (which candidate to prefer).
+15. Perception ablations: the visibility filter off, then noise, latency, drops (plan, section 5).
