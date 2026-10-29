@@ -1,11 +1,11 @@
-"""The expert as a leaderboard agent (Mode A): privileged, but only with what a perception stack could estimate
-(expert/world_model), planning with the behaviour layer and the urban NMPC (core/urban), driving the MKZ through its
-measured actuation (expert/mkz_actuation.py).
+"""The world model and the NMPC as a leaderboard agent, on the map route (SimLingo not in the loop): privileged, but
+only with what a perception stack could estimate (expert/world_model), planning with the behaviour layer and the
+urban NMPC (core/urban), driving the MKZ through its measured actuation (expert/mkz_actuation.py).
 
     scripts/run_bench2drive.sh --agent expert --routes 0-9
 
 It declares a speedometer only: the leaderboard's sensors are not what it drives on. The world model reads the
-world through CarlaDataProvider as PDM-Lite does, within the limits set out in expert/world_model/actors.py.
+world through CarlaDataProvider, within the limits set out in expert/world_model/actors.py.
 With SAVE_PATH set (run_bench2drive.sh sets it), each route's ticks are logged to <SAVE_PATH>/<route>/expert.jsonl.
 """
 import json

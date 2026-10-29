@@ -1,5 +1,5 @@
 """Bench2Drive's leaderboard_evaluator.py with two changes, so that several can run side by side on one GPU.
-Each run owns the 100 ports from its --port up (scripts/run_pdm_lite_route.sh gives job k 20000 + 100 k).
+Each run owns the 100 ports from its --port up (give job k --port=20000 + 100 k).
 
 - Ports: the evaluator takes the first port from --port up that is free, but CARLA also binds the next two
   (streaming and secondary). With either of those still held (a server shutting down, a stray one) the new server

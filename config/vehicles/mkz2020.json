@@ -1,59 +1,9 @@
 {
-  "state": [
-    {
-      "name": "X",
-      "unit": "m",
-      "description": "global position of the centre of gravity, x"
-    },
-    {
-      "name": "Y",
-      "unit": "m",
-      "description": "global position of the centre of gravity, y"
-    },
-    {
-      "name": "psi",
-      "unit": "rad",
-      "description": "heading"
-    },
-    {
-      "name": "Ux",
-      "unit": "m/s",
-      "description": "body-frame longitudinal velocity at the centre of gravity"
-    },
-    {
-      "name": "Uy",
-      "unit": "m/s",
-      "description": "body-frame lateral velocity at the centre of gravity"
-    },
-    {
-      "name": "r",
-      "unit": "rad/s",
-      "description": "yaw rate"
-    },
-    {
-      "name": "delta",
-      "unit": "rad",
-      "description": "road-wheel steering angle"
-    }
-  ],
-  "input": [
-    {
-      "name": "delta_rate",
-      "unit": "rad/s",
-      "description": "road-wheel steering rate"
-    },
-    {
-      "name": "Fx",
-      "unit": "N",
-      "description": "total longitudinal tire force, positive drive, negative brake"
-    }
-  ],
   "vehicle": {
-    "description": "CARLA 0.9.15 vehicle.lincoln.mkz_2020 with its default physics, as Bench2Drive spawns it; actuation tables in mkz2020_actuation.json (scripts/identify_ego.py). The tyre values are the Model 3's, unused by the kinematic urban NMPC.",
+    "description": "CARLA 0.9.15 vehicle.lincoln.mkz_2020 with its default physics, as Bench2Drive spawns it. Raw readout: docs/reference/mkz2020_physics_control_0.9.15.json; the parameters the urban NMPC plans with, derived in docs/vehicle_parameters.md; actuation tables: mkz2020_actuation.json (scripts/identify_ego.py).",
     "sources": {
       "carla": "read from the blueprint's physics control",
       "derived": "computed from carla values",
-      "assumed": "not exposed by CARLA; estimate to be confirmed by a test",
       "design": "chosen for this project",
       "constant": "physical constant"
     },
@@ -64,13 +14,6 @@
         "source": "carla",
         "description": "mass",
         "note": "physics_control.mass"
-      },
-      "Izz": {
-        "value": 2800.0,
-        "unit": "kg m^2",
-        "source": "assumed",
-        "description": "yaw inertia, taken as m*a*b",
-        "note": "not used by the kinematic urban NMPC; m (L/2)^2 order of magnitude"
       },
       "a": {
         "value": 1.172,
@@ -86,134 +29,12 @@
         "description": "centre of gravity to rear axle",
         "note": "rear axle 1.389 m behind the actor origin, plus the centre of mass's 0.30 m"
       },
-      "h": {
-        "value": 0.55,
-        "unit": "m",
-        "source": "assumed",
-        "description": "centre of gravity height",
-        "note": "not used by the kinematic urban NMPC"
-      },
-      "C_alpha_f": {
-        "value": 106500.0,
-        "unit": "N/rad",
-        "source": "derived",
-        "description": "front axle cornering stiffness (both tires); value at the static load, the model uses load_table: stiffness against axle normal load [N], PhysX's per-tire curve rest load x lat_stiff_value x s(load / rest load / lat_stiff_max_load), s(x) = 1.5x - 0.5x^3, flat from 3x the rest load (docs/vehicle_parameters.md)",
-        "load_table": {
-          "Fz": [
-            2765.5,
-            5531.1,
-            8296.6,
-            11062.1,
-            13827.6,
-            16593.2,
-            19358.7,
-            22124.2,
-            27655.3,
-            33186.3
-          ],
-          "C_alpha": [
-            27591.3,
-            54798.4,
-            81237.4,
-            106524.1,
-            130274.3,
-            152104.1,
-            171629.2,
-            188465.6,
-            212536.0,
-            221242.3
-          ]
-        }
-      },
-      "C_alpha_r": {
-        "value": 67800.0,
-        "unit": "N/rad",
-        "source": "derived",
-        "description": "rear axle cornering stiffness (both tires); value at the static load, the model uses load_table: stiffness against axle normal load [N], PhysX's per-tire curve rest load x lat_stiff_value x s(load / rest load / lat_stiff_max_load), s(x) = 1.5x - 0.5x^3, flat from 3x the rest load (docs/vehicle_parameters.md)",
-        "load_table": {
-          "Fz": [
-            1759.3,
-            3518.7,
-            5278.0,
-            7037.3,
-            8796.7,
-            10556.0,
-            12315.3,
-            14074.7,
-            17593.3,
-            21112.0
-          ],
-          "C_alpha": [
-            17552.6,
-            34860.9,
-            51680.4,
-            67766.9,
-            82876.0,
-            96763.4,
-            109184.6,
-            119895.4,
-            135208.1,
-            140746.7
-          ]
-        }
-      },
-      "mu": {
-        "value": 0.9,
-        "unit": "-",
-        "source": "assumed",
-        "description": "tire-road friction coefficient; a scenario variable"
-      },
-      "drive_front": {
-        "value": 0.5,
-        "unit": "-",
-        "source": "assumed",
-        "description": "share of drive force on the front axle (four-wheel drive)"
-      },
-      "brake_front": {
-        "value": 0.5,
-        "unit": "-",
-        "source": "derived",
-        "description": "share of brake force on the front axle"
-      },
-      "F_drive_max": {
-        "value": 11500.0,
-        "unit": "N",
-        "source": "derived",
-        "description": "peak drive force at the wheels",
-        "note": "m x 6.8 m/s^2, the most full throttle gave (scripts/identify_ego.py)"
-      },
       "F_brake_max": {
         "value": 13000.0,
         "unit": "N",
         "source": "derived",
         "description": "peak brake force at the wheels",
-        "note": "m x 7.7 m/s^2, full brake at 10-20 m/s (scripts/identify_ego.py)"
-      },
-      "P_max": {
-        "value": 110000.0,
-        "unit": "W",
-        "source": "derived",
-        "description": "engine power",
-        "note": "full throttle gives about 2.1 m/s^2 at 25 m/s: F 3.6 kN plus drag, times 25 m/s"
-      },
-      "CdA": {
-        "value": 0.6,
-        "unit": "m^2",
-        "source": "assumed",
-        "description": "drag coefficient times frontal area",
-        "note": "drag 0.3 x frontal area about 2 m^2"
-      },
-      "Crr": {
-        "value": 0.012,
-        "unit": "-",
-        "source": "assumed",
-        "description": "rolling resistance coefficient"
-      },
-      "rho": {
-        "value": 1.225,
-        "unit": "kg/m^3",
-        "source": "constant",
-        "description": "air density"
+        "note": "m x 7.7 m/s^2, full brake at 10-20 m/s (scripts/identify_ego.py); the brake torque alone (4 x 800 N m / 0.355 m) would give 5.3 m/s^2"
       },
       "delta_max": {
         "value": 0.95,
@@ -223,17 +44,11 @@
         "note": "road-wheel angle for steer 1 at 20 m/s (it is 1.1 at 3 m/s): the smaller, so it holds at any speed"
       },
       "delta_rate_max": {
-        "value": 1.5,
+        "value": 0.6,
         "unit": "rad/s",
         "source": "design",
         "description": "road-wheel steering rate limit",
-        "note": "CARLA steers without a rate limit (a 0.15 s lag); this keeps plans smooth"
-      },
-      "Ux_min": {
-        "value": 1.0,
-        "unit": "m/s",
-        "source": "design",
-        "description": "slip-angle denominator guard; the model is meant for Ux > 3"
+        "note": "CARLA steers without a rate limit (a 0.15 s lag). At 1.5 rad/s the offline overtakes (sim/urban, a kinematic plant with lags on acceleration and steering) steer back faster than the lagged plant follows, overshoot the lane and swerve; 1.0 is borderline"
       },
       "g": {
         "value": 9.81,

@@ -1,5 +1,5 @@
 """Score a folder of Bench2Drive routes (one sub-folder per route with the leaderboard's result.json, as
-scripts/run_pdm_lite_route.sh writes them).
+the parallel route runner wrote them).
 
     python scripts/summarize_b2d.py <out dir>
 

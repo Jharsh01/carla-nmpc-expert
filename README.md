@@ -1,38 +1,32 @@
 # carla-expert-nmpc
 
-An expert driver for [Bench2Drive](https://github.com/Thinklab-SJTU/Bench2Drive) built on a nonlinear MPC, meant to
-drive better than PDM-Lite, in two modes on one NMPC core:
+[SimLingo](https://github.com/RenzKa/simlingo) driving [Bench2Drive](https://github.com/Thinklab-SJTU/Bench2Drive)
+through an urban nonlinear MPC in place of its PID. One stack:
 
-- **Expert (Mode A):** privileged, but only with what a perception stack on Bench2Drive's sensors could estimate:
-  visible actors in range, the current state of lights and signs, the map. Never other agents' intentions,
-  scenario triggers, occluded actors or future light phases.
-- **SimLingo + NMPC (Mode B):** [SimLingo](https://github.com/RenzKa/simlingo)'s path and speed waypoints as the
-  NMPC's reference in place of its PID, the same world information as constraints.
+- **SimLingo** gives the reference: its path and speed waypoints.
+- **The world model** (`expert/world_model/`) stands in for perception. For now it reads privileged ground truth,
+  but only what a perception stack on Bench2Drive's sensors could estimate: visible actors in range, the current
+  state of lights and signs, and the map. It never reads other agents' intentions, scenario triggers, occluded
+  actors or future light phases. A learned perception model can later replace it behind the same `Scene`.
+- **The urban NMPC and its behaviour layer** (`core/urban/`) track the reference within the world model's
+  constraints, which act as a safety filter.
 
-The plan, its phases and milestones: [docs/plan.md](docs/plan.md).
+Until the SimLingo agent is written, `expert/agents/expert_agent.py` runs the world model and the NMPC on the
+leaderboard's map route. That tests the NMPC and perception half on its own.
 
-## Status
-
-- **M0, done:** the repository bootstrapped, built against SimLingo's Python 3.8.
-- **M1, done offline:** the urban NMPC and the behaviour layer (most of M3 came forward, since the scenarios needed it).
-  All 11 offline scenarios pass: a bend, a lead braking hard, a cut-in, a pedestrian from behind a van, a red light,
-  the red-light dilemma zone, a stop sign, overtaking a parked car (clear, and waiting for oncoming traffic), and
-  yielding to or passing a crossing car. p95 step time is 12 ms with one candidate and 48 ms with three in parallel.
-- **M2, in progress:** the MKZ identified, the world model, the expert driving in CARLA (604 m with 40 traffic cars,
-  no contact), and the leaderboard agent. Bench2Drive route 0 does not drive yet. Where it stopped and how to pick
-  it up: **[docs/STATUS.md](docs/STATUS.md)**. Where the code came from: [PROVENANCE.md](PROVENANCE.md).
+The plan: [docs/plan.md](docs/plan.md). Where the work stopped: **[docs/STATUS.md](docs/STATUS.md)**. Where the
+code came from: [PROVENANCE.md](PROVENANCE.md).
 
 ## Layout
 
 | | |
 |---|---|
-| `core/urban/` | the urban NMPC and the behaviour layer ([its README](core/urban/README.md)) |
-| `core/track_control/` | from carla-track-control: the race-track NMPC, pure pursuit, paths, the bicycle model, directives |
+| `core/urban/` | the urban NMPC, the behaviour layer, the route path and the vehicle parameters ([its README](core/urban/README.md)) |
 | `sim/urban/` | closed-loop scenarios for the urban NMPC without CARLA (`build/urban_scenarios`) |
-| `sim/plant/` | the bicycle plant |
 | `bindings/expertctl.cpp` | the Python module `expertctl` |
-| `expert/` | Python: frames, actuation, the world model and the leaderboard agents |
-| `scripts/` | CARLA, SimLingo and Bench2Drive: install and run |
+| `expert/world_model/` | the perception stand-in: route and lanes from the map, visible actors, stop lines |
+| `expert/` | frames, MKZ actuation, the per-tick driver and the leaderboard agents |
+| `scripts/` | CARLA, SimLingo and Bench2Drive: install and run; MKZ identification |
 
 ## Setup
 
@@ -49,5 +43,6 @@ external/simlingo_venv/bin/python -m pytest -q
 ## Bench2Drive
 
 ```bash
-scripts/run_bench2drive.sh --routes 0-19 --no-cot --fast    # SimLingo with its PID, as published
+scripts/run_bench2drive.sh --routes 0-19 --no-cot --fast    # SimLingo with its PID, as published (the baseline)
+scripts/run_bench2drive.sh --agent expert --routes 0        # the world model and the NMPC on the map route
 ```

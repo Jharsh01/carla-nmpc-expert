@@ -1,6 +1,12 @@
-# Status and hand-off (27 October 2026)
+# Status and hand-off (27 October 2026; scope narrowed 29 October)
 
-Where the work stopped, what has been measured, and how to pick it up. The plan is `docs/plan.md`; the M0/M1 report
+Where the work stopped, what has been measured, and how to pick it up. On 29 October the scope was narrowed to
+SimLingo + the urban NMPC + the privileged world model. The PDM-Lite baseline and the race-track NMPC, pure pursuit
+and directives copied from carla-track-control were removed (they are in git history before that date). What was
+left of `track_control` (path, vehicle parameters, RK4) was folded into `core/urban`, and the dynamic bicycle plant
+dropped. The MKZ, read from CARLA, is now the only vehicle (`docs/vehicle_parameters.md`): the offline scenarios ran
+on the Model 3 before. On it `parked_car_overtake` drives correctly but its p95 solve time is 56–58 ms, over the
+50 ms check (46.8 ms on the Model 3), so `urban.scenarios` fails on timing alone. The plan is `docs/plan.md`; the M0/M1 report
 is `docs/m0_m1_report.pdf`; the urban NMPC's design reasons are in `core/urban/README.md`.
 
 ## Milestones
@@ -10,7 +16,7 @@ is `docs/m0_m1_report.pdf`; the urban NMPC's design reasons are in `core/urban/R
 | M0: repo bootstrapped | Done. |
 | M1: urban NMPC + offline scenarios | Done. All 11 scenarios pass (`docs/run_logs/urban_scenarios.txt`). The behaviour layer, planned for M3, was built here too. |
 | M2: world model, MKZ actuation, expert on an empty route | **In progress.** The parts are written and drive in CARLA outside the leaderboard. The first leaderboard route fails (see the open bug). |
-| M3–M6 | Not started (PDM-Lite baseline, dev-set iteration, Mode B / SimLingo, full evaluation). |
+| M3–M5 | Not started (SimLingo + NMPC agent, dev-set iteration against SimLingo + PID, full evaluation). |
 
 ## What M2 added (this session, after the report)
 
@@ -38,7 +44,7 @@ is `docs/m0_m1_report.pdf`; the urban NMPC's design reasons are in `core/urban/R
   - Parked or queued decided from hazard lights, being off the lane, or 4 s at rest with nothing ahead.
 - **`expert/driver.py`**: the per-tick loop shared by the agent and the test script. It plans at 10 Hz, controls
   at 20 Hz, and logs every tick, with a scene snapshot at every plan.
-- **`expert/agents/expert_agent.py`**: leaderboard agent (Mode A). `scripts/run_bench2drive.sh --agent expert`.
+- **`expert/agents/expert_agent.py`**: leaderboard agent, the world model and the NMPC on the map route (no SimLingo yet). `scripts/run_bench2drive.sh --agent expert`.
 - **`scripts/drive_expert.py`**: drive the expert outside the leaderboard (`--town --length --traffic`).
 - **Core changes:**
   - `Path::project(x, y, s_from, s_to)`: a windowed projection, used by the NMPC and the behaviour layer (long routes).
@@ -126,5 +132,5 @@ git. The SimLingo venv has CasADi 3.7.2, pybind11, imageio-ffmpeg and pytest add
 1. Fix the route 0 blockers and get route 0 driving.
 2. Run the 22 routes SimLingo already has results for (`results/bench2drive/bench2drive_routes.csv`: routes 0–21)
    and compare.
-3. Set up PDM-Lite as the baseline (M4).
+3. Write the SimLingo + NMPC agent (`docs/plan.md`, section 4).
 4. Pick one route per scenario type as the dev set.

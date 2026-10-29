@@ -1,7 +1,6 @@
 """Conversions between the library's frame and CARLA's.
 
-The library (core/track_control/include/track_control/types.hpp) works in a right-handed world frame: x
-forward, y to the left, heading psi counter-clockwise, angles in radians, at
+The NMPC (core/urban) works in a right-handed world frame: x forward, y to the left, heading psi counter-clockwise, angles in radians, at
 the centre of gravity. CARLA (Unreal Engine) is left-handed: y points to the
 right, yaw turns clockwise, angles are in degrees, and an actor's location is
 its origin, not its centre of gravity. OpenDRIVE is right-handed; CARLA flips y

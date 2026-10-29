@@ -6,13 +6,11 @@ history. Changes since then are this repository's own.
 
 | here | there |
 |---|---|
-| `core/track_control/` | `track_control/` (unchanged: NMPC, pure pursuit, path, bicycle model, directives) |
-| `sim/plant/` | `sim/plant/` (bicycle plant only; Project Chrono left behind) |
-| `expert/frames.py`, `expert/actuation.py` | `carla_bridge/` |
+| `core/urban/` `path`, `vehicle_params`, `integrate`, `body`, `tests/` | `track_control/` (folded into `core/urban` on 29 October 2026, namespace `ex`; its race-track NMPC, pure pursuit, speed profile, directives, dynamic bicycle and tyre model, and `sim/plant/`'s bicycle plant were removed) |
+| `expert/frames.py` | `carla_bridge/` (and `actuation.py`, since replaced by the MKZ's `expert/mkz_actuation.py`) |
 | `scripts/` | `scripts/` (CARLA, SimLingo and Bench2Drive; env.sh now points at SimLingo's venv) |
 | `config/vehicles/` | `config/vehicles/` |
-| `docs/reference/` | `docs/` (the NMPC derivations and solve-time study, vehicle parameters) |
+| `docs/reference/` | `docs/` (vehicle parameters) |
 
 Not copied: the race track (`sim/racetrack/`, `carla_bridge/` apart from the two files above), the Chrono
-plant and the corner-outage scenarios. `FallbackControl` (`sim/racetrack/fallback_control.*`, the NMPC to pure
-pursuit handover) is tied to the race track's `Driver`; its blend is to be ported to the urban NMPC (docs/plan.md, M1).
+plant, the corner-outage scenarios and `FallbackControl` (the NMPC to pure pursuit handover).

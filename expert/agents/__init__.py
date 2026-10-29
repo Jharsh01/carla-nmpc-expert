@@ -1,1 +1,1 @@
-"""Leaderboard agents: the expert (Mode A) and SimLingo with the NMPC (Mode B)."""
+"""Leaderboard agents: the world model and the NMPC on the map route, and (to come) SimLingo with the NMPC."""

@@ -10,7 +10,7 @@
 //
 // Three ways to build one:
 // - `from_corners`: a closed polygon whose corners are rounded with a radius
-//   each (how the race track is drawn);
+//   each;
 // - `from_waypoints`: points along a route, e.g. CARLA waypoints, joined by
 //   biarcs, so the path passes through every point with continuous heading;
 // - `from_pieces`: the pieces themselves, from a start pose.
@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace tc {
+namespace ex {
 
 struct Pose {
     double x, y, psi;
@@ -91,4 +91,4 @@ double wrap_angle(double angle);
 // Pose after travelling `ds` from `from` at constant curvature `kappa`.
 Pose advance(const Pose& from, double kappa, double ds);
 
-}  // namespace tc
+}  // namespace ex

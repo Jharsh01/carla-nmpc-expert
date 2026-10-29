@@ -1,22 +1,22 @@
 // Python module `expertctl`: the NMPC core for the Bench2Drive agents (expert/agents/).
 //
-// States and inputs are numpy arrays in the library's convention (core/track_control/include/track_control/types.hpp):
-// right-handed world frame, centre of gravity. expert/frames.py converts from CARLA's.
+// Positions are in a right-handed world frame (heading counter-clockwise) at the centre of gravity; expert/frames.py
+// converts from CARLA's.
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "track_control/directive.hpp"
-#include "track_control/path.hpp"
-#include "track_control/vehicle_params.hpp"
+#include "urban/body.hpp"
+#include "urban/path.hpp"
+#include "urban/vehicle_params.hpp"
 #include "urban/behaviour.hpp"
 #include "urban/urban_nmpc.hpp"
 
 namespace py = pybind11;
-using namespace tc;
+using namespace ex;
 
 PYBIND11_MODULE(expertctl, m) {
-    m.doc() = "NMPC core of carla-expert-nmpc (track_control, the urban NMPC)";
+    m.doc() = "NMPC core of carla-expert-nmpc: paths, vehicle parameters, the urban NMPC and the behaviour layer";
 
     py::class_<VehicleParams> params(m, "VehicleParams");
     params.def(py::init<>()).def_static("from_file", &VehicleParams::from_file).def("L", &VehicleParams::L);
@@ -39,20 +39,9 @@ PYBIND11_MODULE(expertctl, m) {
         .def_property_readonly("piece_curvatures", &Path::piece_curvatures)
         .def_property_readonly("piece_poses", &Path::piece_poses);
 
-    py::class_<Zone>(m, "Zone", "a place for the NMPC to keep out of, in path coordinates (track_control/directive.hpp)")
-        .def(py::init([](double s, double e_y, double length, double width, double speed) {
-                 return Zone{s, e_y, length, width, speed};
-             }),
-             py::arg("s"), py::arg("e_y"), py::arg("length") = 1.0, py::arg("width") = 1.0, py::arg("speed") = 0.0)
-        .def_readwrite("s", &Zone::s)
-        .def_readwrite("e_y", &Zone::e_y)
-        .def_readwrite("length", &Zone::length)
-        .def_readwrite("width", &Zone::width)
-        .def_readwrite("speed", &Zone::speed);
-
     py::class_<Body>(m, "Body")
         .def(py::init([](double length, double width, double cg_to_center) { return Body{length, width, cg_to_center}; }),
-             py::arg("length") = 4.79, py::arg("width") = 2.16, py::arg("cg_to_center") = 0.45)
+             py::arg("length") = 4.89, py::arg("width") = 1.84, py::arg("cg_to_center") = 0.31)
         .def_readwrite("length", &Body::length)
         .def_readwrite("width", &Body::width)
         .def_readwrite("cg_to_center", &Body::cg_to_center);

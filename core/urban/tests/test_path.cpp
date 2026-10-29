@@ -3,9 +3,9 @@
 #include <stdexcept>
 
 #include "check.hpp"
-#include "track_control/path.hpp"
+#include "urban/path.hpp"
 
-using namespace tc;
+using namespace ex;
 
 static void rounded_rectangle() {
     // 200 x 100 m, driven anticlockwise, corner radius 20 m

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Download CARLA 0.9.15 (the packaged Linux release, 8.4 GB) into external/carla.
 #
-# The race track is generated from OpenDRIVE at run time, so CARLA's additional
-# maps are not needed. A partial download is continued when the script is run
-# again. CARLA_URL overrides the address.
+# Bench2Drive's additional maps are added by scripts/install_simlingo.sh. A partial
+# download is continued when the script is run again. CARLA_URL overrides the address.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh

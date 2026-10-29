@@ -5,7 +5,13 @@
 - `behaviour.hpp`: classifies actors (lead, blocker, crosser, mover), builds candidate plans (yield or pass each
   crosser; stay behind a blocker or borrow the left lane), solves them in parallel and picks one. It also holds
   the traffic-rule state (stop-sign hold, red-light dilemma zone).
-- `sim/urban/scenarios.cpp` (`build/urban_scenarios`, a ctest): 11 closed-loop scenarios without CARLA.
+- `path.hpp`: the route as straights and arcs, fitted through waypoints (biarcs), with projection (windowed for
+  long routes), pose and curvature at s. Tested by `tests/test_path.cpp`.
+- `vehicle_params.hpp`: the MKZ's parameters the NMPC plans with (`config/vehicles/mkz2020.json`,
+  `docs/vehicle_parameters.md`); `body.hpp`: its body size.
+- `integrate.hpp`: the RK4 step the NMPC discretises its model with.
+- `sim/urban/scenarios.cpp` (`build/urban_scenarios`, a ctest): 11 closed-loop scenarios without CARLA, on a
+  kinematic plant with lags on acceleration and steering.
 
 ## Why it is built this way
 

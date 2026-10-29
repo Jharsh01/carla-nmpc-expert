@@ -93,7 +93,7 @@ Decision Behaviour::step(const Scene& sc) {
     // straight behind the route's start would look in the lane at s = 0: there its distance stands in for the offset
     auto project = [&](double x, double y) {
         auto [s, e] = route.project(x, y, s_lo, s_hi);
-        const tc::Pose q = route.pose(s);
+        const Pose q = route.pose(s);
         const double d = std::hypot(x - q.x, y - q.y);
         if (d > std::fabs(e) + 0.5) e = e >= 0.0 ? d : -d;
         return std::make_pair(s, e);
@@ -105,7 +105,7 @@ Decision Behaviour::step(const Scene& sc) {
         tr.actor = &a;
         for (size_t i = 0; i < a.t.size(); ++i) {
             const auto [s, e] = project(a.x[i], a.y[i]);
-            const double rel = tc::wrap_angle(a.psi[i] - route.pose(s).psi);
+            const double rel = wrap_angle(a.psi[i] - route.pose(s).psi);
             tr.t.push_back(a.t[i]);
             tr.s.push_back(s);
             tr.e.push_back(e);

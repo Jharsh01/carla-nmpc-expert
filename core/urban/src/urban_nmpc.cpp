@@ -15,7 +15,7 @@
 #include <functional>
 #include <stdexcept>
 
-#include "track_control/model/integrate.hpp"
+#include "urban/integrate.hpp"
 
 namespace ex {
 
@@ -229,7 +229,7 @@ UrbanNMPC::UrbanNMPC(Path route_, VehicleParams params, Body body_, Options o)
             return SX::vertcat({s_dot, z(IV) * sin(z(IPSI) + beta), z(IV) * cos(beta) * tan(z(IDELTA)) / L - kap * s_dot,
                                 z(IA), v(IJERK), v(IRATE)});
         };
-        const SX nxt = tc::rk4_step(f, xk, uk, steps[k]);
+        const SX nxt = rk4_step(f, xk, uk, steps[k]);
         g.push_back(xs[k + 1] - nxt);  // gap closing first
         equality.insert(equality.end(), NX, true);
         if (k == 0) {
@@ -345,7 +345,7 @@ Eigen::Matrix<double, NX, 1> UrbanNMPC::path_state(const Ego& ego) const {
     const auto [s, e_y] = std::isnan(s_last_) ? route.project(ego.x, ego.y) : route.project(ego.x, ego.y, s_last_ - 30.0, s_last_ + 60.0);
     s_last_ = s;
     Eigen::Matrix<double, NX, 1> z;
-    z << s, e_y, tc::wrap_angle(ego.psi - route.pose(s).psi), ego.v, ego.a, ego.delta;
+    z << s, e_y, wrap_angle(ego.psi - route.pose(s).psi), ego.v, ego.a, ego.delta;
     return z;
 }
 

@@ -1,7 +1,7 @@
 // Fixed-step integration.
 #pragma once
 
-namespace tc {
+namespace ex {
 
 // One classical Runge-Kutta step of dx/dt = f(x, u) with u held constant.
 template <class F, class X, class U>
@@ -13,4 +13,4 @@ X rk4_step(F&& f, const X& x, const U& u, double dt) {
     return x + dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
 }
 
-}  // namespace tc
+}  // namespace ex

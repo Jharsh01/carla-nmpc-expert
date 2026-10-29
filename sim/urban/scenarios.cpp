@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "track_control/vehicle_params.hpp"
+#include "urban/vehicle_params.hpp"
 #include "urban/behaviour.hpp"
 
 using namespace ex;
@@ -166,7 +166,7 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     const double dt_ctrl = 0.05, dt_plant = 0.005, tau_a = 0.25, tau_d = 0.05;
     const int solve_every = 2;
     // plant state, in the world frame at the centre of gravity
-    tc::Pose start = sc.route.pose(10.0);
+    Pose start = sc.route.pose(10.0);
     double x = start.x, y = start.y, psi = start.psi, v = sc.v0, a = 0.0, delta = 0.0;
     Plan plan;
     double t_plan = 0.0;
@@ -420,7 +420,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-    const VehicleParams p = VehicleParams::from_file(SIM_CONFIG_DIR "/vehicles/model3.json");
+    const VehicleParams p = VehicleParams::from_file(SIM_CONFIG_DIR "/vehicles/mkz2020.json");
     const Body body;
     bool all = true;
     std::printf("%-24s %-5s %9s %8s %8s %8s %9s %6s  %-28s %s\n", "scenario", "", "clear [m]", "jerk", "a_lat", "s_end",
