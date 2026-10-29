@@ -48,4 +48,4 @@ Throttle, brake and steering responses measured by `scripts/identify_ego.py` (de
 speed, steering gain and lag) are in `config/vehicles/mkz2020_actuation.json`, which `expert/mkz_actuation.py` uses.
 
 The body (`ex::Body`, `urban/body.hpp`): 4.89 × 1.84 m, the centre of gravity 0.31 m ahead of the body's centre. The agent widens it
-by 0.2 m for the mirrors (`expert/driver.py`).
+by 0.2 m for the mirrors (`expert/agents/simlingo_nmpc_agent.py`).

@@ -30,6 +30,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <string>
@@ -68,6 +69,7 @@ struct Mover {
     std::vector<double> t, s, e_y;  // [s], [m], [m]
     double radius = 1.0;  // [m]
     double growth = 0.0;  // the radius grows by this much per second of prediction [m/s]
+    double margin = NAN;  // clearance kept to it [m]; NaN: Options::margin
 };
 
 // A car ahead in the lane: where its rear is along the route at times t (its speed is taken from these).
@@ -168,6 +170,12 @@ public:
 
     Plan solve(const Problem& problem);
     void reset();  // forget the previous plan: the next solve starts cold
+    // Plan along another route from now on (a new path from SimLingo each update), given in a frame that may differ
+    // from the old route's: `old_frame` is where the old frame's origin and x axis are in the new one (identity: the
+    // same frame; for routes in the car's frame, where the car was at the last plan as seen from where it is now).
+    // The previous plan, kept to start the next solve from, is carried over into the new route's coordinates. The
+    // route should reach as far as the horizon goes, and a little behind the car.
+    void set_route(Path route, Pose old_frame = {0.0, 0.0, 0.0});
 
     // The ego's path state [s, e_y, e_psi, v, a, delta] for a measurement: projected onto the route near where it
     // was last (the whole route the first time and after reset()).
@@ -175,7 +183,7 @@ public:
     // Names of the constraint groups, in the order of Plan::slack_max.
     static const std::vector<std::string>& groups();
 
-    const Path route;
+    Path route;  // set_route() changes it
     const VehicleParams p;
     const Body body;
     const Options opt;

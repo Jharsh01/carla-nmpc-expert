@@ -22,7 +22,12 @@ PYBIND11_MODULE(expertctl, m) {
     params.def(py::init<>()).def_static("from_file", &VehicleParams::from_file).def("L", &VehicleParams::L);
     for (const auto& field : VehicleParams::fields()) params.def_readwrite(field.name, field.member);
 
-    py::class_<Pose>(m, "Pose").def_readonly("x", &Pose::x).def_readonly("y", &Pose::y).def_readonly("psi", &Pose::psi);
+    py::class_<Pose>(m, "Pose")
+        .def(py::init([](double x, double y, double psi) { return Pose{x, y, psi}; }), py::arg("x") = 0.0,
+             py::arg("y") = 0.0, py::arg("psi") = 0.0)
+        .def_readonly("x", &Pose::x)
+        .def_readonly("y", &Pose::y)
+        .def_readonly("psi", &Pose::psi);
 
     py::class_<Path>(m, "Path")
         .def_static("from_waypoints", &Path::from_waypoints, py::arg("points"), py::arg("closed"))
@@ -80,7 +85,8 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("s", &ex::Mover::s)
         .def_readwrite("e_y", &ex::Mover::e_y)
         .def_readwrite("radius", &ex::Mover::radius)
-        .def_readwrite("growth", &ex::Mover::growth);
+        .def_readwrite("growth", &ex::Mover::growth)
+        .def_readwrite("margin", &ex::Mover::margin);
 
     py::class_<ex::Lead>(m, "Lead")
         .def(py::init([](std::vector<double> t, std::vector<double> s_rear) { return ex::Lead{std::move(t), std::move(s_rear)}; }),
@@ -135,6 +141,7 @@ PYBIND11_MODULE(expertctl, m) {
              py::arg("options") = Opt())
         .def("solve", &ex::UrbanNMPC::solve, py::call_guard<py::gil_scoped_release>())
         .def("reset", &ex::UrbanNMPC::reset)
+        .def("set_route", &ex::UrbanNMPC::set_route, py::arg("route"), py::arg("old_frame") = Pose{0.0, 0.0, 0.0})
         .def("path_state", &ex::UrbanNMPC::path_state)
         .def_static("groups", &ex::UrbanNMPC::groups)
         .def_readonly("times", &ex::UrbanNMPC::times)
@@ -205,6 +212,7 @@ PYBIND11_MODULE(expertctl, m) {
     py::class_<ex::Candidate>(m, "Candidate")
         .def_readonly("label", &ex::Candidate::label)
         .def_readonly("plan", &ex::Candidate::plan)
+        .def_readonly("problem", &ex::Candidate::problem)
         .def_readonly("score", &ex::Candidate::score);
 
     py::class_<ex::Decision>(m, "Decision")
@@ -218,7 +226,7 @@ PYBIND11_MODULE(expertctl, m) {
     py::class_<BOpt> bopt(m, "BehaviourOptions");
     bopt.def(py::init<>());
 #define BFIELD(name) bopt.def_readwrite(#name, &BOpt::name)
-    BFIELD(pool); BFIELD(look_ahead); BFIELD(gate_margin); BFIELD(gate_buffer); BFIELD(blocker_range);
+    BFIELD(pool); BFIELD(look_ahead); BFIELD(gate_margin); BFIELD(gate_buffer); BFIELD(blocker_range); BFIELD(blocker_overlap); BFIELD(static_margin);
     BFIELD(oncoming_gap); BFIELD(stop_hold); BFIELD(dilemma_decel); BFIELD(hysteresis); BFIELD(w_out_of_lane);
     BFIELD(pass_penalty); BFIELD(slack_ok);
 #undef BFIELD
@@ -229,5 +237,7 @@ PYBIND11_MODULE(expertctl, m) {
              py::call_guard<py::gil_scoped_release>())
         .def("step", &ex::Behaviour::step, py::call_guard<py::gil_scoped_release>())
         .def("reset", &ex::Behaviour::reset)
+        .def("set_route", &ex::Behaviour::set_route, py::arg("route"), py::arg("old_frame") = Pose{0.0, 0.0, 0.0},
+             py::call_guard<py::gil_scoped_release>())
         .def_readonly("route", &ex::Behaviour::route);
 }

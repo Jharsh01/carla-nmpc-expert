@@ -340,6 +340,25 @@ void UrbanNMPC::reset() {
     s_last_ = NAN;
 }
 
+void UrbanNMPC::set_route(Path next, Pose old_frame) {
+    Impl& m = *impl_;
+    if (m.warm) {  // each stage of the previous plan: where it is in the new frame, then on the new route
+        const double c = std::cos(old_frame.psi), sn = std::sin(old_frame.psi);
+        for (int k = 0; k <= N; ++k) {
+            double* z = m.w0.data() + m.x_at(k);
+            const Pose q = route.pose(z[IS], z[IE]);
+            const double x = old_frame.x + c * q.x - sn * q.y, y = old_frame.y + sn * q.x + c * q.y;
+            const double psi = route.pose(z[IS]).psi + z[IPSI] + old_frame.psi;
+            const auto [s, e_y] = next.project(x, y);
+            z[IS] = s;
+            z[IE] = e_y;
+            z[IPSI] = wrap_angle(psi - next.pose(s).psi);
+        }
+    }
+    route = std::move(next);
+    s_last_ = NAN;
+}
+
 Eigen::Matrix<double, NX, 1> UrbanNMPC::path_state(const Ego& ego) const {
     // near where the car was last (a long route is not searched whole, nor mistaken where it passes near itself)
     const auto [s, e_y] = std::isnan(s_last_) ? route.project(ego.x, ego.y) : route.project(ego.x, ego.y, s_last_ - 30.0, s_last_ + 60.0);
@@ -409,7 +428,7 @@ Plan UrbanNMPC::solve(const Problem& pr) {
             const double t = times[k + 1];
             slot.s[k] = sample(mv.t, mv.s, t);
             slot.e[k] = sample(mv.t, mv.e_y, t);
-            slot.R[k] = r_ego + mv.radius + mv.growth * t + opt.margin;
+            slot.R[k] = r_ego + mv.radius + mv.growth * t + (std::isnan(mv.margin) ? opt.margin : mv.margin);
             slot.distance = std::min(slot.distance, std::hypot(slot.s[k] - s_plan[k + 1], slot.e[k] - e_plan[k + 1]) - slot.R[k]);
         }
         slots.push_back(std::move(slot));

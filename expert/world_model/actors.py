@@ -19,6 +19,11 @@ import numpy as np
 from expert import frames
 
 HORIZON, STEP = 5.0, 0.25  # [s] of each predicted trajectory
+# Bench2Drive spawns the parked cars along the route as static.prop.mesh actors with car meshes
+# (leaderboard/scenarios/route_scenario.py, spawn_parked_vehicles), whose bounding boxes CARLA gets wrong (a 5 m
+# Charger reports 3.0 x 3.9 m; on Town12 they came out 2.0 x 4.3 m, a car turned sideways): taken as parked cars of
+# this size, along the actor's heading, as a detector would report them
+PARKED_CAR = (4.8, 2.0)  # length, width [m]
 
 
 class Track:
@@ -29,6 +34,7 @@ class Track:
         self.last_seen = -math.inf
         self.still_since = None  # when it last came to rest
         self.length = self.width = 0.0
+        self.mesh_car = False  # a parked car spawned as a static mesh (PARKED_CAR)
 
     def add(self, t, x, y, psi):
         self.history.append((t, x, y, psi))
@@ -79,6 +85,8 @@ def kind_of(actor):
     if tid.startswith("vehicle."):
         wheels = int(actor.attributes.get("number_of_wheels", 4))
         return "bike" if wheels == 2 else "vehicle"
+    if tid == "static.prop.mesh":  # Bench2Drive's parked cars (PARKED_CAR)
+        return "vehicle"
     if tid.startswith("static.prop."):
         return "object"
     return None
@@ -138,9 +146,14 @@ class Actors:
             cx, cy = frames.from_carla_xy(*_rotate(bb.location.x, bb.location.y, tr.rotation.yaw))
             track.add(t, x + cx, y + cy, frames.from_carla_yaw(tr.rotation.yaw))
             track.length, track.width = 2.0 * bb.extent.x, 2.0 * bb.extent.y
+            if actor.type_id == "static.prop.mesh":
+                track.mesh_car = True
+                track.length, track.width = PARKED_CAR
             track.last_seen = t
             track.actor = actor
-        for aid in [a for a, tr in self.tracks.items() if t - tr.last_seen > self.keep]:
+        # tracks lapse `keep` seconds after last seen; an actor the scenario has removed is gone at once (CARLA
+        # answers nothing about it any more)
+        for aid in [a for a, tr in self.tracks.items() if t - tr.last_seen > self.keep or not tr.actor.is_alive]:
             del self.tracks[aid]
 
     # ---- prediction
@@ -148,6 +161,8 @@ class Actors:
     def _parked(self, track, t):
         """At rest and not waiting in traffic: hazard lights on, off the driving lanes or well off a lane's centre,
         or at rest for 4 s with nothing ahead holding it up (no vehicle within 10 m ahead in its lane, no light)."""
+        if track.mesh_car:
+            return True
         if track.kind != "vehicle" or track.still_since is None:
             return False
         actor = track.actor
@@ -211,13 +226,16 @@ class Actors:
         psi = np.interp(dist, travelled, psis)
         return times, x, y, psi
 
-    def scene_actors(self, t):
-        """expertctl.Actor for every track, with its predicted trajectory."""
+    def scene_actors(self, t, frame):
+        """expertctl.Actor for every track, with its predicted trajectory, in the car's frame (`frame`: the car's
+        true pose, as a detector on the car reports what it sees relative to the car). The tracks themselves are kept
+        in the world, where they stand still when the car moves."""
         ex = self.ex
         kinds = {"vehicle": ex.Actor.Kind.vehicle, "bike": ex.Actor.Kind.bike, "walker": ex.Actor.Kind.walker,
                  "object": ex.Actor.Kind.object}
         out = []
-        for track in self.tracks.values():
+        gone = []
+        for track in list(self.tracks.values()):
             _, x0, y0, psi0 = track.history[-1]
             vx, vy = track.velocity()
             speed = math.hypot(vx, vy)
@@ -225,10 +243,14 @@ class Actors:
             a.id = track.id
             a.kind = kinds[track.kind]
             a.length, a.width = max(track.length, 0.5), max(track.width, 0.5)
-            a.parked = self._parked(track, t)
-            predicted = None
-            if track.kind == "vehicle" and speed >= 0.5:
-                predicted = self._follow_lane(track, speed, track.accel())
+            try:  # both read the actor (its lights, its lane): one the scenario has just removed answers nothing
+                a.parked = self._parked(track, t)
+                predicted = None
+                if track.kind == "vehicle" and speed >= 0.5:
+                    predicted = self._follow_lane(track, speed, track.accel())
+            except RuntimeError:
+                gone.append(track.id)
+                continue
             if predicted is None:  # constant velocity (at rest for a parked car or an object)
                 times = np.arange(0.0, HORIZON + 1e-9, STEP)
                 moving = track.kind != "object" and not a.parked and speed >= 0.2
@@ -236,8 +258,11 @@ class Actors:
                 predicted = (times, x0 + (vx * times if moving else 0.0 * times), y0 + (vy * times if moving else 0.0 * times),
                              np.full_like(times, psi))
             times, x, y, psi = predicted
-            a.t, a.x, a.y, a.psi = [list(map(float, v)) for v in (times, x, y, psi)]
+            cx, cy = frame.to_car(np.asarray(x, dtype=float), np.asarray(y, dtype=float))
+            a.t, a.x, a.y, a.psi = [list(map(float, v)) for v in (times, cx, cy, np.asarray(psi) - frame.psi)]
             out.append(a)
+        for aid in gone:
+            del self.tracks[aid]
         return out
 
 

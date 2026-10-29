@@ -93,6 +93,15 @@ public:
         double gate_margin = 1.0;  // kept between the ego's body and a crosser's [m]
         double gate_buffer = 1.0;  // a crosser's window widened by this much either side [s]
         double blocker_range = 40.0;  // a blocker nearer than this may be overtaken [m]
+        // A parked car or an object is in the lane (a blocker, or a lead) only if it reaches this far into it; one
+        // that only grazes the lane is kept clear of as a mover, by nudging within the lane. Without it a car parked
+        // beside the lane, its box tilted a little against a wobbling path (SimLingo's), blocks the lane.
+        double blocker_overlap = 0.3;  // [m]
+        // Kept to parked cars and objects instead of the NMPC's margin, without the growth with prediction time a
+        // moving actor's clearance has: nothing about where they will be is uncertain. With the NMPC's 0.5 m and the
+        // circles' cover, a car parked beside a 2.9 m lane (2.65 m off the path) could not be driven past at all
+        // (Bench2Drive route 0).
+        double static_margin = 0.2;  // [m]
         double oncoming_gap = 20.0;  // kept to oncoming traffic when overtaking [m]
         double stop_hold = 1.0;  // [s] at a stop sign
         double dilemma_decel = 5.0;  // a light turning red that needs more than this to stop for is driven through [m/s^2]
@@ -108,8 +117,11 @@ public:
 
     Decision step(const Scene& scene);
     void reset();  // forget plans and rule state (a new route)
+    // Plan along another route from the next step on (UrbanNMPC::set_route, with the old route's frame as seen in
+    // the new one), keeping the plans and the rule state: the scene is then in the new frame, along the new route.
+    void set_route(Path route, Pose old_frame = {0.0, 0.0, 0.0});
 
-    const Path route;
+    Path route;  // set_route() changes it
     const Body body;
     const Options opt;
 

@@ -9,6 +9,12 @@
 //
 //   build/urban_scenarios [--only NAME] [--out DIR]     exit status 1 if any scenario fails its checks
 //
+// Each scenario also runs as <name>@local: the behaviour layer then plans along a short path rebuilt every plan,
+// as SimLingo's predicted path will be in CARLA (Behaviour::set_route), not along the scenario's road. The path
+// starts at the car, joins the lane centre smoothly over 15 m with a different wobble each time, reaches 20 m ahead and
+// goes on along the lane centre for 160 m (the map's lane, past SimLingo's last point). The lanes and stop lines
+// are taken along it from the road, as the world model does from the map.
+//
 // Each scenario is checked for: no contact between the bodies, the body on the road, its own goal (stopped at
 // the line, through by some time), and the solve time (p95 under 50 ms). --out writes a trace per scenario.
 #include <algorithm>
@@ -20,6 +26,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -105,7 +112,43 @@ struct Scenario {
     // the scenario's own goal, from the trace: an empty string when met, else what went wrong
     std::function<std::string(const std::vector<std::array<double, 8>>&)> goal;
     double road_lo = -0.5 * LANE, road_hi = 0.5 * LANE;  // where the body must stay [m]
+    bool local = false;  // plan along a local path rebuilt every plan (<name>@local)
 };
+
+// A path as SimLingo predicts one, for the car at (s_car, e_car) on the road: from 15 m behind to 20 m ahead,
+// starting at the car and joining the lane centre (with a wobble of up to `wobble`) smoothly over 15 m; then on
+// along the lane centre for 160 m (as the agent goes on along the map's lane past SimLingo's last point), as far as
+// the behaviour layer looks for actors (look_ahead + 80 m).
+Path local_path(const Path& road, double s_car, double e_car, double wobble, std::mt19937& rng) {
+    std::uniform_real_distribution<double> phase(0.0, 2.0 * M_PI);
+    const double phi = phase(rng);
+    auto offset = [&](double d) {  // from the road's lane centre
+        const double join = d <= 0.0 ? 1.0 : d >= 15.0 ? 0.0 : 0.5 * (1.0 + std::cos(M_PI * d / 15.0));
+        const double fade = d <= 20.0 ? 1.0 : d >= 30.0 ? 0.0 : 0.5 * (1.0 + std::cos(M_PI * (d - 20.0) / 10.0));
+        return join * e_car + (1.0 - join) * fade * wobble * std::sin(2.0 * M_PI * d / 30.0 + phi);
+    };
+    std::vector<Point> points;
+    for (double d = -15.0; d <= 180.0 + 1e-9; d += d < 40.0 ? 1.0 : 5.0) {
+        const Pose q = road.pose(s_car + d, offset(d));
+        points.push_back({q.x, q.y});
+    }
+    return Path::from_waypoints(points, false);
+}
+
+// The scenario's lane, every 2 m along a local path, relative to it (the road's lane is where it is on the road).
+std::vector<LaneSection> lanes_along(const Path& local, const Path& road, const LaneSection& lane) {
+    std::vector<LaneSection> out;
+    for (double s = 0.0; s < local.length(); s += 2.0) {
+        const Pose q = local.pose(s);
+        const double e_road = road.project(q.x, q.y).second;
+        LaneSection l = lane;
+        l.s_from = s, l.s_to = s + 2.0;
+        l.lo = lane.lo - e_road, l.hi = lane.hi - e_road;
+        out.push_back(l);
+    }
+    out.back().s_to = INF;
+    return out;
+}
 
 Motion constant(double s, double e, double psi, double vs, double ve, double t) {
     return {s + vs * t, e + ve * t, psi, vs, ve, 0.0};
@@ -161,6 +204,7 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     nmpc_options.jit = true;  // compiled once into the cache, loaded after that
     nmpc_options.cache_dir = URBAN_CACHE_DIR;
     Behaviour behaviour(sc.route, p, body, nmpc_options, Behaviour::Options());
+    std::mt19937 rng(1);
     std::vector<double> step_times;
     const double L = p.L(), lr = p.b;
     const double dt_ctrl = 0.05, dt_plant = 0.005, tau_a = 0.25, tau_d = 0.05;
@@ -191,6 +235,20 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
             scene.lanes = sc.lanes;
             scene.actors = perceive(sc, t);
             if (sc.stops) scene.stops = sc.stops(t);
+            if (sc.local) {
+                Path local = local_path(sc.route, s, e, 0.15, rng);
+                const LaneSection lane = sc.lanes.empty() ? LaneSection{} : sc.lanes.front();
+                scene.lanes = lanes_along(local, sc.route, lane);
+                for (StopLine& st : scene.stops) {
+                    const Pose q = sc.route.pose(st.s);
+                    st.s = local.project(q.x, q.y).first;
+                }
+                for (double ls = 0.0; ls < local.length(); ls += 2.0) {  // SimLingo's line: the path itself
+                    scene.line_s.push_back(ls);
+                    scene.line_e.push_back(0.0);
+                }
+                behaviour.set_route(std::move(local));
+            }
             const Decision d = behaviour.step(scene);
             plan = d.plan;
             t_plan = t;
@@ -403,6 +461,14 @@ std::vector<Scenario> scenarios(const Body& body) {
         Scenario sc{"crossing_pass", straight(), 10.0, 11.1, 10.0};
         sc.actors.push_back({"crossing", 4.8, 2.0, [](double t) { return constant(45.0, -75.0, M_PI_2, 0.0, 9.0, t); }});
         sc.goal = reach(80.0, 10.0);
+        out.push_back(sc);
+    }
+    const size_t n = out.size();
+    for (size_t i = 0; i < n; ++i) {  // each again, planned along SimLingo-like local paths
+        if (out[i].lanes.size() > 1) continue;  // lanes_along takes one lane section
+        Scenario sc = out[i];
+        sc.name += "@local";
+        sc.local = true;
         out.push_back(sc);
     }
     return out;
