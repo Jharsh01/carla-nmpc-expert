@@ -17,8 +17,9 @@ through an urban nonlinear MPC in place of its PID. One stack:
 The agent is `expert/agents/simlingo_nmpc_agent.py`: SimLingo's `LingoAgent` with its PID (`control_pid`) replaced
 by the NMPC.
 
-The plan: [docs/plan.md](docs/plan.md). Where the work stopped: **[docs/STATUS.md](docs/STATUS.md)**. Where the
-code came from: [PROVENANCE.md](PROVENANCE.md).
+The plan: [docs/plan.md](docs/plan.md). How it all works: [docs/architecture.pdf](docs/architecture.pdf). What is
+open: **[docs/todo.md](docs/todo.md)**; what was learned: [docs/learnings.md](docs/learnings.md). Older hand-off
+notes: [docs/STATUS.md](docs/STATUS.md). Where the code came from: [PROVENANCE.md](PROVENANCE.md).
 
 ## Layout
 
