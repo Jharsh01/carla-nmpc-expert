@@ -49,6 +49,9 @@ struct LaneSection {
     double left_width = 0.0;  // drivable width beyond hi: the lane to the left [m], 0 if none
     bool left_oncoming = true;  // that lane runs the other way
     bool left_allowed = false;  // it may be driven into, to go round a blocker
+    // The road's edges: the outer edges of its outermost driving lanes either side (beyond them a shoulder, a kerb,
+    // a sidewalk). The corridor never goes past them, not when it is widened to where the car is, nor round a blocker.
+    double road_lo = -INF, road_hi = INF;  // [m]
 };
 
 struct StopLine {

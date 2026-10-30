@@ -171,18 +171,21 @@ PYBIND11_MODULE(expertctl, m) {
 
     py::class_<ex::LaneSection>(m, "LaneSection")
         .def(py::init([](double s_from, double s_to, double lo, double hi, double left_width, bool left_oncoming,
-                         bool left_allowed) {
-                 return ex::LaneSection{s_from, s_to, lo, hi, left_width, left_oncoming, left_allowed};
+                         bool left_allowed, double road_lo, double road_hi) {
+                 return ex::LaneSection{s_from, s_to, lo, hi, left_width, left_oncoming, left_allowed, road_lo, road_hi};
              }),
              py::arg("s_from") = 0.0, py::arg("s_to") = ex::INF, py::arg("lo") = -1.75, py::arg("hi") = 1.75,
-             py::arg("left_width") = 0.0, py::arg("left_oncoming") = true, py::arg("left_allowed") = false)
+             py::arg("left_width") = 0.0, py::arg("left_oncoming") = true, py::arg("left_allowed") = false,
+             py::arg("road_lo") = -ex::INF, py::arg("road_hi") = ex::INF)
         .def_readwrite("s_from", &ex::LaneSection::s_from)
         .def_readwrite("s_to", &ex::LaneSection::s_to)
         .def_readwrite("lo", &ex::LaneSection::lo)
         .def_readwrite("hi", &ex::LaneSection::hi)
         .def_readwrite("left_width", &ex::LaneSection::left_width)
         .def_readwrite("left_oncoming", &ex::LaneSection::left_oncoming)
-        .def_readwrite("left_allowed", &ex::LaneSection::left_allowed);
+        .def_readwrite("left_allowed", &ex::LaneSection::left_allowed)
+        .def_readwrite("road_lo", &ex::LaneSection::road_lo)
+        .def_readwrite("road_hi", &ex::LaneSection::road_hi);
 
     py::class_<ex::StopLine> stop(m, "StopLine");
     py::enum_<ex::StopLine::Kind>(stop, "Kind")

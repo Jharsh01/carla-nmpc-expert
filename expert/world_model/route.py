@@ -33,9 +33,37 @@ def _angle(a):
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
-class _Pose:
+def _lane_key(wp):
+    return wp.road_id, wp.section_id, wp.lane_id
+
+
+class _Across:
+    """The path's normal at a point, in the world (x, y, heading psi): where map lanes cross it."""
+
     def __init__(self, x, y, psi):
         self.x, self.y, self.psi = x, y, psi
+        self.n = (-math.sin(psi), math.cos(psi))  # to the left
+
+    def against(self, wp):
+        """The lane runs against the path."""
+        return math.cos(_angle(frames.from_carla_yaw(wp.transform.rotation.yaw) - self.psi)) < 0.0
+
+    def neighbour(self, wp, left):
+        """The lane beside wp on the path's left (or right); CARLA's left and right are the lane's own."""
+        return wp.get_right_lane() if left == self.against(wp) else wp.get_left_lane()
+
+    def cut(self, wp, min_cos=0.5):
+        """(lo, hi): where the normal crosses the lane's right and left edges (the path's right and left), or None if
+        the lane runs more than 60 deg across the path (then it is not the path's lane: a crossing road)."""
+        yaw = frames.from_carla_yaw(wp.transform.rotation.yaw)
+        nl = (-math.sin(yaw), math.cos(yaw))  # the lane's normal
+        cos = self.n[0] * nl[0] + self.n[1] * nl[1]
+        if abs(cos) < min_cos:
+            return None
+        cx, cy = _xy(wp.transform.location)
+        centre = ((cx - self.x) * nl[0] + (cy - self.y) * nl[1]) / cos
+        half = 0.5 * wp.lane_width / abs(cos)
+        return centre - half, centre + half
 
 
 class Route:
@@ -114,42 +142,70 @@ class Route:
     # ---- the road along it
 
     def lanes(self, path, frame, window=6):
-        """The lane under the path and its left neighbour, every SPACING metres, merged where nothing changes. The
-        band at each point is widened to the union over +-window points, so a lane change has both lanes in it."""
-        carla = self.carla
+        """The lane under the path, its left neighbour and the road's edges, every SPACING metres, merged where nothing
+        changes; all as offsets across the path (y left). Each edge is taken where the path's normal there crosses it,
+        so the lane stays where it is when the path runs at an angle to it (SimLingo's path drifting off the lane, the
+        NMPC swerving). Only where the path changes lane (the lane at one point a neighbour of the lane at another,
+        within +-window points) does the band take in both lanes. The road's edges are the outer edges of the
+        outermost driving lanes either side, oncoming ones included: beyond them a shoulder, parking, a kerb, a
+        sidewalk, which the corridor never goes into. In a junction, and where the nearest lane crosses the path, the
+        band is a lane's width on the path, with no road edges."""
         rows = []
         for s in np.arange(0.0, path.length, SPACING):
             q = path.pose(s)
-            px, py = frame.to_world(q.x, q.y)
-            pose = _Pose(px, py, q.psi + frame.psi)  # in the world, where the map is
-            wp = self._waypoint(pose.x, pose.y)
-            if wp is None:
-                rows.append((s, -1.75, 1.75, 0.0, True, False))
+            across = _Across(*frame.to_world(q.x, q.y), q.psi + frame.psi)  # in the world, where the map is
+            wp = self._waypoint(across.x, across.y)
+            band = None if wp is None else across.cut(wp)
+            if band is None or wp.is_junction:
+                half = 0.5 * (wp.lane_width if wp is not None else 3.5)
+                rows.append({"lo": -half, "hi": half, "left": 0.0, "oncoming": True, "allowed": False,
+                             "road": (-math.inf, math.inf), "lane": None, "neighbours": ()})
                 continue
-            cx, cy = _xy(wp.transform.location)
-            e_c = -(cx - pose.x) * math.sin(pose.psi) + (cy - pose.y) * math.cos(pose.psi)  # lane centre off the path
-            half = 0.5 * wp.lane_width
-            # on a lane the path runs against (SimLingo overtaking in the oncoming lane), the car's left is the lane's
-            # right, and a neighbour running against that lane runs the car's way
-            against = math.cos(_angle(frames.from_carla_yaw(wp.transform.rotation.yaw) - pose.psi)) < 0.0
-            left = wp.get_right_lane() if against else wp.get_left_lane()
-            left_ok = left is not None and left.lane_type == carla.LaneType.Driving and not wp.is_junction
-            oncoming = left_ok and (left.lane_id * wp.lane_id < 0) != against
-            rows.append((s, e_c - half, e_c + half, left.lane_width if left_ok else 0.0, bool(oncoming), bool(left_ok)))
+            left, right = across.neighbour(wp, left=True), across.neighbour(wp, left=False)
+            left_ok = self._drivable(left)
+            road = [self._road_edge(across, wp, left=False), self._road_edge(across, wp, left=True)]
+            rows.append({"lo": band[0], "hi": band[1], "left": left.lane_width if left_ok else 0.0,
+                         "oncoming": bool(left_ok and across.against(left)),
+                         "allowed": bool(left_ok), "road": tuple(road), "lane": _lane_key(wp),
+                         "neighbours": tuple(_lane_key(n) for n in (left, right) if self._drivable(n))})
         sections = []
-        for i, (s, lo, hi, lw, onc, ok) in enumerate(rows):
-            near = rows[max(0, i - window): i + window + 1]
-            lo = min(r[1] for r in near)
-            hi = max(r[2] for r in near)
-            key = (round(lo, 1), round(hi, 1), round(lw, 1), onc, ok)
+        for i, row in enumerate(rows):
+            lo, hi = row["lo"], row["hi"]
+            for other in rows[max(0, i - window): i + window + 1]:  # a lane change: both lanes
+                if other["lane"] is not None and other["lane"] in row["neighbours"]:
+                    lo, hi = min(lo, other["lo"]), max(hi, other["hi"])
+            road_lo, road_hi = min(row["road"][0], lo), max(row["road"][1], hi)
+            key = (round(lo, 1), round(hi, 1), round(row["left"], 1), row["oncoming"], row["allowed"],
+                   round(road_lo, 1), round(road_hi, 1))
             if sections and sections[-1][1] == key:
-                sections[-1][0][1] = s + SPACING
+                sections[-1][0][1] = (i + 1) * SPACING
             else:
-                sections.append(([s, s + SPACING], key))
-        out = [self.ex.LaneSection(s_from=a, s_to=b, lo=lo, hi=hi, left_width=lw, left_oncoming=onc, left_allowed=ok)
-               for (a, b), (lo, hi, lw, onc, ok) in sections]
+                sections.append(([i * SPACING, (i + 1) * SPACING], key))
+        out = [self.ex.LaneSection(s_from=a, s_to=b, lo=lo, hi=hi, left_width=lw, left_oncoming=onc, left_allowed=ok,
+                                   road_lo=rlo, road_hi=rhi)
+               for (a, b), (lo, hi, lw, onc, ok, rlo, rhi) in sections]
         out[-1].s_to = float("inf")
         return out
+
+    def _drivable(self, wp):
+        return wp is not None and wp.lane_type in (self.carla.LaneType.Driving, self.carla.LaneType.Bidirectional)
+
+    def _road_edge(self, across, wp, left):
+        """The offset across the path of the road's edge on one side: the outer edge of the outermost driving lane
+        reached from wp through neighbouring driving lanes (oncoming ones too)."""
+        edge = across.cut(wp)[1 if left else 0]
+        seen = {_lane_key(wp)}
+        cur = wp
+        for _ in range(8):
+            cur = across.neighbour(cur, left)
+            if not self._drivable(cur) or _lane_key(cur) in seen:
+                break
+            seen.add(_lane_key(cur))
+            band = across.cut(cur)
+            if band is None:
+                break
+            edge = max(edge, band[1]) if left else min(edge, band[0])
+        return edge
 
     def _on_path(self, path, x, y, psi=None, max_offset=1.75, max_angle=45.0):
         """Arc length of (x, y) on the path if within max_offset of it (and heading its way if psi is given)."""

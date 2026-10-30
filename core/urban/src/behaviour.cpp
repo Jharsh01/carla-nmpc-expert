@@ -255,8 +255,9 @@ Decision Behaviour::step(const Scene& sc) {
         const LaneSection& l = section(s);
         const double w = std::clamp((s - s0) / merge, 0.0, 1.0);
         lane_corridor.s.push_back(s);
-        lane_corridor.lo.push_back(std::min(l.lo, (1.0 - w) * (z0[IE] - half) + w * l.lo));
-        lane_corridor.hi.push_back(std::max(l.hi, (1.0 - w) * (z0[IE] + half) + w * l.hi));
+        // but never past the road's edges: a car off the road is asked back onto it at once
+        lane_corridor.lo.push_back(std::max(l.road_lo, std::min(l.lo, (1.0 - w) * (z0[IE] - half) + w * l.lo)));
+        lane_corridor.hi.push_back(std::min(l.road_hi, std::max(l.hi, (1.0 - w) * (z0[IE] + half) + w * l.hi)));
         double ref = 0.5 * (l.lo + l.hi);
         if (!sc.line_s.empty()) {  // the line asked for, kept where the body fits in the lane
             const double margin = 0.5 * body.width + 0.1;
@@ -357,7 +358,8 @@ Decision Behaviour::step(const Scene& sc) {
                 Corridor& cr = c.problem.corridor;
                 for (size_t i = 0; i < cr.s.size(); ++i) {
                     const LaneSection& li = section(cr.s[i]);
-                    if (cr.s[i] > s0 - 10.0 && cr.s[i] < b_hi + 15.0 && li.left_allowed) cr.hi[i] = li.hi + li.left_width;
+                    if (cr.s[i] > s0 - 10.0 && cr.s[i] < b_hi + 15.0 && li.left_allowed)
+                        cr.hi[i] = std::min(li.road_hi, li.hi + li.left_width);
                     if (cr.s[i] > b_lo - 12.0 && cr.s[i] < b_hi + 6.0) cr.ref[i] = li.hi + 0.5 * li.left_width;
                 }
                 for (const Crosser& x : crossers) c.problem.gates.push_back(yield_gate(x));

@@ -12,6 +12,14 @@ by side on one GPU (each run owns the 100 ports from its --port up: give job k -
   frame is reported); and every 10 s of simulation time, how fast it runs against real time (simulation seconds
   per wall-clock second: 1.0 is real time). All printed as "Sync: ..." lines.
 
+- CPUs: the evaluator's process (the leaderboard's loop, the agent's main thread) and the CARLA server it starts are
+  pinned to their CPUs (expert/cpus.py), apart from the agent's SimLingo worker and NMPC thread, which pin themselves
+  to theirs.
+
+- Timing: with SAVE_PATH set (run_bench2drive.sh sets it), the wall-clock time of each stage of every tick (CARLA's
+  step, the sensors, the agent, the scenario tree; the agent adds its own) to <SAVE_PATH>/<route>/timing.jsonl
+  (expert/timing.py; summarised by scripts/timing_report.py).
+
 - Ports: the evaluator takes the first port from --port up that is free, but CARLA also binds the next two
   (streaming and secondary). With either of those still held (a server shutting down, a stray one) the new server
   dies at start ("bind: Address already in use") and the evaluator waits for it for up to 20 x --timeout. Here a
@@ -30,6 +38,9 @@ import sys
 import time
 
 faulthandler.enable()  # a crash in CARLA's client library prints the Python stack to the log
+from expert import cpus  # noqa: E402  (the repository is on PYTHONPATH: run_bench2drive.sh)
+
+cpus.pin("main")  # before any thread starts: they all inherit it
 base = int(next(a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--port=")))
 MAX_STOPPED = float(os.environ.get("B2D_MAX_STOPPED") or 0.0)  # [s] at rest before the route is stopped; 0: off
 MAX_TIME = float(os.environ.get("B2D_MAX_TIME") or 0.0)  # [s] of simulation time before the route is stopped; 0: off
@@ -65,12 +76,115 @@ def find_free_port(starting_port):
     raise RuntimeError(f"no free port from {starting_port}")
 
 
+def install_timing():
+    """Time each stage of the leaderboard's tick (expert/timing.py), one row per tick to <SAVE_PATH>/<route>/timing.jsonl."""
+    save = os.environ.get("SAVE_PATH")
+    if not save:
+        return
+    import carla
+    import py_trees
+    from leaderboard.autoagents.agent_wrapper import AgentWrapper
+    from leaderboard.envs.sensor_interface import SensorInterface
+    from leaderboard.scenarios.scenario_manager import ScenarioManager
+    from srunner.scenariomanager.carla_data_provider import CarlaDataProvider
+    from srunner.scenariomanager.timer import GameTime
+
+    from expert import timing
+
+    timing.wrap(carla.World, "tick", "carla.world_tick")  # the server's step, and waiting for it
+    timing.wrap(CarlaDataProvider, "on_carla_tick", "carla.data_provider")  # the actors' poses and speeds, cached
+    timing.wrap(AgentWrapper, "__call__", "agent")
+    timing.wrap(SensorInterface, "get_data", "agent.sensors")  # waiting for this frame's cameras, IMU, GNSS...
+    timing.wrap(py_trees.behaviour.Behaviour, "tick_once", "scenario_tree")  # the scenarios and the criteria
+    tick = ScenarioManager._tick_scenario
+    route = os.path.basename(os.environ.get("ROUTES", "route")).replace(".xml", "")
+
+    def timed_tick(self):
+        if getattr(self, "_timing_start", None) != self.start_game_time:  # a new route
+            self._timing_start = self.start_game_time
+            os.makedirs(os.path.join(save, route), exist_ok=True)
+            timing.open_log(os.path.join(save, route, "timing.jsonl"))
+        frame = self.tick_count
+        try:
+            with timing.stage("total"):
+                tick(self)
+        finally:
+            if self.tick_count != frame:  # a step was taken
+                timing.end_tick(tick=self.tick_count, t=round(GameTime.get_time() - self.start_game_time, 3))
+
+    ScenarioManager._tick_scenario = timed_tick
+
+
+VIDEO_VIEWS = {  # name: (x, y, z, pitch, fov) on the ego, 960 x 540
+    "chase": (-9.0, 0.0, 4.5, -18.0, 90.0),
+    "top": (6.0, 0.0, 40.0, -90.0, 70.0),  # about 56 m across, the car a little below the centre
+}
+
+
+def install_video():
+    """With B2D_VIDEO set (and SAVE_PATH): two cameras on the ego, a chase view and one looking straight down, saved
+    every other tick (10 frames a simulated second) to <SAVE_PATH>/<route>/video/, with the route's start time;
+    scripts/make_video.py makes them into a video. They are not the agent's sensors: it never sees them."""
+    save = os.environ.get("SAVE_PATH")
+    if not (save and os.environ.get("B2D_VIDEO")):
+        return
+    import carla
+    import numpy as np
+    import cv2
+    from leaderboard.scenarios.scenario_manager import ScenarioManager
+    from srunner.scenariomanager.carla_data_provider import CarlaDataProvider
+    from srunner.scenariomanager.timer import GameTime
+
+    route = os.path.basename(os.environ.get("ROUTES", "route")).replace(".xml", "")
+    out = os.path.join(save, route, "video")
+    tick, stop = ScenarioManager._tick_scenario, ScenarioManager.stop_scenario
+
+    def saver(name):
+        def on_image(image):
+            if round(image.timestamp / FIXED_DT) % 2:
+                return
+            rgb = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)[:, :, :3]
+            cv2.imwrite(os.path.join(out, f"{name}_{image.timestamp:.2f}.jpg"), rgb, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        return on_image
+
+    def video_tick(self):
+        if getattr(self, "_video_start", None) != self.start_game_time:  # a new route
+            self._video_start = self.start_game_time
+            os.makedirs(out, exist_ok=True)
+            world = CarlaDataProvider.get_world()
+            with open(os.path.join(out, "start.txt"), "w") as f:  # the route's start on the images' clock
+                f.write(f"{world.get_snapshot().timestamp.elapsed_seconds - (GameTime.get_time() - self.start_game_time):.3f}\n")
+            bp = world.get_blueprint_library().find("sensor.camera.rgb")
+            bp.set_attribute("image_size_x", "960")
+            bp.set_attribute("image_size_y", "540")
+            self._video_cams = []
+            for name, (x, y, z, pitch, fov) in VIDEO_VIEWS.items():
+                bp.set_attribute("fov", str(fov))
+                cam = world.spawn_actor(bp, carla.Transform(carla.Location(x=x, y=y, z=z), carla.Rotation(pitch=pitch)),
+                                        attach_to=self.ego_vehicles[0])
+                cam.listen(saver(name))
+                self._video_cams.append(cam)
+        tick(self)
+
+    def video_stop(self):
+        for cam in getattr(self, "_video_cams", []):
+            cam.stop()
+            cam.destroy()
+        self._video_cams = []
+        return stop(self)
+
+    ScenarioManager._tick_scenario = video_tick
+    ScenarioManager.stop_scenario = video_stop
+
+
 _Popen = subprocess.Popen
 
 
 def _popen(cmd, *args, **kwargs):
     if isinstance(cmd, str) and "-graphicsadapter=" in cmd and "kill -9" in cmd:
         cmd = kill_servers_cmd(base)
+    elif isinstance(cmd, str) and "CarlaUE4.sh" in cmd and cpus.cpus("carla"):
+        cmd = f"taskset -c {','.join(map(str, sorted(cpus.cpus('carla'))))} {cmd}"
     return _Popen(cmd, *args, **kwargs)
 
 
@@ -146,5 +260,7 @@ evaluator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evaluator)
 evaluator.find_free_port = find_free_port
 install_watchdog(evaluator)  # the sync check always; the watchdog's limits only when set
+install_timing()  # after the watchdog: its checks count in the tick's total
+install_video()  # outermost: the cameras exist before the route's first tick
 sys.argv[0] = path
 evaluator.main()

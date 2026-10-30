@@ -6,7 +6,7 @@
 #
 #   scripts/run_bench2drive.sh --agent simlingo_nmpc --routes 0-9   SimLingo through the urban NMPC
 #                                                                   (expert/agents/simlingo_nmpc_agent.py),
-#                                                                   SimLingo predicting at 1 Hz, the NMPC at 10 Hz
+#                                                                   SimLingo predicting at 1 Hz, the NMPC at 5 Hz
 #   scripts/run_bench2drive.sh --agent simlingo ...                 SimLingo with its PID, as published (the default)
 #
 #   scripts/run_bench2drive.sh                       all 220 routes (days on one GPU: see below)
@@ -14,6 +14,10 @@
 #   scripts/run_bench2drive.sh --routes 3,17,120     these routes
 #   scripts/run_bench2drive.sh --seed 2 --tries 1    traffic manager seed (default 1), attempts per route (default 2)
 #   scripts/run_bench2drive.sh --debug               record each route: front camera with the planned path, 4 frames/s
+#   scripts/run_bench2drive.sh --video               record each route from two cameras on the car (a chase view and
+#                                                    one from above, not seen by the agent) into
+#                                                    videos/<route>_<scenario>.mp4, real time, with the NMPC's log
+#                                                    under them (scripts/make_video.py)
 #   scripts/run_bench2drive.sh --no-cot              no commentary before the waypoints (about 3x faster)
 #   scripts/run_bench2drive.sh --agent simlingo_nmpc --live
 #                                                    watch the NMPC's solves live in a browser (expert/live_view.py):
@@ -45,7 +49,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 
-routes=all seed=1 tries=2 debug=0 cot=1 fast=0 agent=simlingo max_stopped=30 max_time=70 live=0 out=
+routes=all seed=1 tries=2 debug=0 cot=1 fast=0 agent=simlingo max_stopped=30 max_time=70 live=0 out= record=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --routes) routes=$2; shift ;;
@@ -53,6 +57,7 @@ while [[ $# -gt 0 ]]; do
         --seed) seed=$2; shift ;;
         --tries) tries=$2; shift ;;
         --debug) debug=1 ;;
+        --video) record=1 ;;
         --no-cot) cot=0 ;;
         --fast) fast=1 ;;
         --max-stopped) max_stopped=$2; shift ;;
@@ -106,6 +111,7 @@ export SCENARIO_RUNNER_ROOT=$SIMLINGO/Bench2Drive/scenario_runner
 export PYTHONPATH="$SIMLINGO:$SIMLINGO/team_code:$CARLA_ROOT/PythonAPI/carla:$SIMLINGO/Bench2Drive/leaderboard:$SCENARIO_RUNNER_ROOT:$REPO/build/python:$REPO"
 export SIMLINGO_DEBUG=$debug SIMLINGO_COT=$cot SIMLINGO_FAST=$fast
 export B2D_MAX_STOPPED=$max_stopped B2D_MAX_TIME=$max_time  # the watchdog, in scripts/b2d_evaluator.py
+if [[ $record == 1 ]]; then export B2D_VIDEO=1; else unset B2D_VIDEO; fi  # the cameras, in scripts/b2d_evaluator.py
 if [[ $live == 1 ]]; then
     export NMPC_LIVE_PORT=${NMPC_LIVE_PORT:-8765}
     echo "live view: http://localhost:$NMPC_LIVE_PORT (from elsewhere: ssh -L $NMPC_LIVE_PORT:localhost:$NMPC_LIVE_PORT <this machine>)"
@@ -160,6 +166,12 @@ print(f"   {r['status']}: score {s['score_composed']:.1f}, route {s['score_route
 EOF
     else
         echo "   no result after $tries attempts: see $out_root/out/$name.log"
+    fi
+    if [[ $record == 1 && -d $out_root/viz/$name/video ]]; then
+        mkdir -p "$out_root/videos"
+        scenario=$("$VPY" -c "import sys, xml.etree.ElementTree as ET; print(next(ET.parse(sys.argv[1]).iter('scenario')).get('type'))" "$route")
+        "$VPY" "$REPO/scripts/make_video.py" "$out_root/viz/$name" "$out_root/videos/${name#bench2drive_}_$scenario.mp4" \
+            --title "$name  $agent" | sed 's/^/   video: /' && rm -rf "$out_root/viz/$name/video"
     fi
     if [[ $debug == 1 ]]; then  # the agent's frames (every 5th step) into one video, real time
         frames=$(find "$out_root/viz" -type d -path "*/${name}_*/images" | sort | tail -1)
