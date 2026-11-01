@@ -21,6 +21,15 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The path and the frame
 
+- **Forcing the path through the car makes it weave** (route 0, 31 Oct, results/bench2drive/path_overlay_route0;
+  `path_points` joins the car's origin to SimLingo's line). SimLingo's line is steady in the world: each new
+  prediction lands 6-8 cm RMS from the last at 2-10 m ahead. The car is 5 cm off it at the median and 15 cm at p95,
+  and the join then bends: curvature 0.047 1/m (p95 0.13) over the first 6 m against 0.013 over the next 12, and the
+  path's heading at the car 8.06 deg RMS off the car's. On the line as predicted it is 1.42 deg. Re-solving 103 logged
+  plans offline with the line kept where it is (no actors, same car states, open loop): steering RMS 0.068 -> 0.037
+  rad, plan-to-plan change 0.079 -> 0.046. Replay against logged steering: correlation 0.74, so the size is
+  approximate. Not the cause: SimLingo's 1 Hz update (steering moves no more just after it), odometry (3 cm, 5 cm,
+  0.02 deg over each hold against the true pose; the signs are right).
 - **A straight continuation past SimLingo's path is wrong in bends.** The corridor (from the road) drifts sideways
   along it, so the NMPC treats a bend as a lane shift: `curve@local` drifted 0.54 m starting 40 m before the bend,
   and entered it too fast. A lead in the bend would project metres off the path and be missed. Decision: continue
@@ -50,6 +59,21 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The NMPC and the behaviour layer
 
+- **In steady traffic the behaviour layer holds the car, not SimLingo** (results/bench2drive/intent_z, 31 Oct). SimLingo
+  asks to stop on 17-28 % of plans on routes 1, 8 and 10. Routes 8 and 10 have a stream about 2 s apart, every plan
+  has a crosser within 3 s, and `gate_buffer` widens each gate 1 s either side, so no gap is left. On route 8, 145 of 145
+  plans also have a gate "to inf" (`t_out` is INF when the last prediction sample is in the lane): the stream runs down
+  the exit lane, so it is traffic to merge with, but `crossing_kind` reads the direction at t = 0 only and calls it a
+  crosser.
+- **Route 8's gaps fit only without margin.** The stream is 13 m/s with about 1.9 s between cars. Merging with 3 m
+  behind needs 2.8 s at 3 m/s² to 6 m/s, or 2.1 s at 5 m/s² to 7.5 m/s. A to-scale profile clears 1.3 m ahead and
+  0.9 m behind. Plain SimLingo enters this stream (100 %, no infractions, twice), though 78.6 m in 11.5 s looks
+  over-counted. ActorFlow cars ignore other vehicles until one collides, so the stream will not brake for the car.
+- **Constraints can be switched at run time but not added.** The solver has 34 rows a step (850 in all) and 6 slack
+  groups; a row is switched by parameters (`mov_on` per slot, `lead_on`, `cap_on`, `floor_on` per step) and an off row
+  is a constant -1. A rebuild takes over a minute. So a dynamic constraint system has to change what fills the fixed
+  slots. Design: conflicts, a lifecycle, a phase, and one space-time tube a plan
+  (https://claude.ai/artifact/5mgXZSJodoQ7Sk3Cf27chh; not implemented).
 - **The car can be steered off the road, and nothing stops it** (route 0, run of 30 Oct 01:22, rebuilt offline
   from Town12.xodr and metric_info.json). At t 12.7 s the cut-in car (3697), parked on the left, pulls into the lane
   5 m ahead. No note says "cut-in": it was a mover, so the NMPC kept its circles clear by steering right, to full lock
@@ -110,6 +134,9 @@ whenever a run, a test or a dead end teaches something not obvious from the code
   never sees them) into `videos/<route>_<scenario>.mp4` with the NMPC's log under them (`scripts/make_video.py`).
   CARLA's image clock runs ahead of the route's (by about 1 s on route 0: ticks before the route starts), so the
   evaluator writes the route's start on the image clock to `video/start.txt`.
+- **`--video` draws SimLingo's path, the NMPC's path and its plan on both views** when `nmpc.jsonl` has them (the
+  agent now logs these and the true pose, for analysis only). `--keep-frames` keeps the frames to remake a video. The
+  video runs up to 15 % fast: route 0 lost frames (249 for 29 s), so go by the time in its bar.
 - **Real time is out of reach on 4 cores.** With the agent's work off the loop, what is left is CARLA's step
   (42 ms), the sensors (19 ms) and the leaderboard's scenario tree (48 ms), about 110 ms a tick before the world
   model, against 50 ms. SimLingo's restart creep, the DEBUG frames and `metric_info.json` every tick are gone with
@@ -120,3 +147,20 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 - **An exception in the leaderboard's tick loop is recorded as "Simulation crashed"**, with the route's score so far
   kept; Bench2Drive's merge drops only "Agent crashed" routes. The watchdog uses this.
 - **One leaderboard process per route**, so anything served from the agent (the live view) restarts per route.
+- **Give `map.get_waypoint` a height.** At z = 0 it returned the wrong lane for 19 % of Town12's road points off junctions
+  (roads are 298-380 m up), against 4 % at the road's height. On route 8 this
+  put the band on the oncoming lane 2.75 m away, and the NMPC steered the car off the road. Route 8 went from 10 % to 43 %.
+  `Frame` now carries the car's z; `Route._waypoint` takes it.
+- **Lane keeping (`expertctl.PathIntent`).** SimLingo's line is measured against the map lane from 8 m ahead, not against the
+  car's heading, so a bend is not a manoeuvre. Off by over 1 m starts following SimLingo, under 0.5 m ends it. Otherwise the
+  path is the lane's centre and the speed is the limit, unless SimLingo drops under 1 m/s within 2 s. Largest offset in
+  lane-keeping on routes 0, 1, 8, 10: 0.57 m; a real manoeuvre showed 2.6 m at once (route 1) or 2.7 m (route 8). A turn is
+  found the same way only where the lane's branch differs from SimLingo's: on route 10 the lane already follows the left
+  turn, so it stays in lane keeping throughout, and that is fine. On route 0 steering RMS fell from 0.060 to 0.019 rad, the
+  heading swing from 1.49 to 0.54 deg RMS (6.2 to 1.9 max), and 95th percentile lateral acceleration from 1.36 to 0.37.
+- **Repeat runs of a route are mostly the same run.** Thirteen runs of route 0 (seeds 1-6) gave 3 distinct drives: ten ended at
+  30.55 s with the same steering and failed plans (the same to 2-3 figures), two at 28.05 s and one at 27.65 s. They
+  match up to 12 s. The seed made no difference: seed 2 gave 27.65 s once and 30.55 s once. Which drive a run gets is not
+  known. A count of passes on repeats says little, so vary something that matters, not just `--seed`.
+- **The last field of an actor in `nmpc.jsonl`'s scene is metres predicted over 5 s, not a speed** (`simlingo_nmpc_agent.py:383`).
+  Divide by 5 for m/s: 65 is 13 m/s. Read as km/h it misled the analysis of routes 0, 1, 8 and 10.

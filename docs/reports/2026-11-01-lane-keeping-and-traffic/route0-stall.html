@@ -1,0 +1,115 @@
+<title>Route 0 Stall</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track replay sheet. The video is the page; run data sits under it as a log. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+header { display: grid; gap: 8px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+video { display: block; width: 100%; max-width: 100%; aspect-ratio: 1920 / 604; background: #000; }
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chapters button { font: 500 13px/1.3 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 11px; cursor: pointer; text-align: left; }
+.chapters button:hover { border-color: var(--accent); }
+.chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chapters b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); }
+tr.now td { font-weight: 500; }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 8px; max-width: 72ch; }
+code { font: 400 14px var(--mono); }
+.note { color: var(--muted); font-size: 14px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Route 0 stalled at 19.6 %</h1>
+    <div class="meta">bench2drive_00 · ParkingCutIn · Town12 · simlingo_nmpc --no-cot --fast · 31 Oct 2026 · branch lane-band-worker-timing @ 1583a1c</div>
+  </header>
+
+  <div>
+    <video id="v" controls playsinline preload="auto">
+      <source src="00_ParkingCutIn.mp4" type="video/mp4">
+    </video>
+    <div class="chapters" aria-label="Jump to a moment">
+      <button data-t="5.3"><b>6.0 s</b>false cut-in starts</button>
+      <button data-t="6.4"><b>7.3 s</b>full brake on an empty lane</button>
+      <button data-t="7.2"><b>8.2 s</b>stopped</button>
+      <button data-t="10"><b>11 s</b>car behind stops too</button>
+      <button data-t="33"><b>37 s</b>still stopped, watchdog ends it</button>
+    </div>
+  </div>
+
+  <section>
+    <h2>What happened</h2>
+    <p>The car pulled away normally and reached about 29 km/h. It then braked at the full −7 m/s² in a clear lane, stopped, and never moved again. There was no collision and it stayed in its lane. The watchdog ended the route after 30 s at rest.</p>
+  </section>
+
+  <section>
+    <h2>Why it stopped</h2>
+    <ol>
+      <li><strong>The brake looks caused by the car behind.</strong> Every "cut-in" note in this run reads <code>s 0.0 m</code>, which is the car's own position. No actor was at that spot. Actor 3705 was 15 m behind and closing, and the notes stopped once it stopped. Its position is off the path's start, so <code>behaviour.cpp</code> sees it as not in the lane now but in the lane soon, and the branch at line 187 treats it as a lead. This is inferred from the log and the code, and I have not confirmed it in a test.</li>
+      <li><strong>Why it stayed stopped is still unknown.</strong> From about 12 s there is no cut-in note and SimLingo's path reaches 18.7 m ahead, yet the NMPC reports success with a −1.2 m/s² plan and the steering at full lock (−0.95 rad). Nothing in the logged scene explains it. A solver stuck at rest is a guess.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Route 0 varies from run to run</h2>
+    <p>The same code has now given three very different results. All three had a hard stop early and a −7 m/s² brake. The two better runs recovered from it.</p>
+    <div class="scroll">
+      <table>
+        <tr><th>Run</th><th>Route</th><th>Ended</th><th>First stop</th></tr>
+        <tr><td>lanes_route0</td><td class="good">100 %</td><td>completed, 31.6 s</td><td>7.1 s</td></tr>
+        <tr><td>video_route0</td><td class="warn">91 %</td><td>watchdog, 67.6 s</td><td>11.8 s</td></tr>
+        <tr class="now"><td>video_route0_oct31 (this run)</td><td class="bad">19.6 %</td><td>watchdog, 38.4 s</td><td>7.7 s</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>This run's numbers</h2>
+    <div class="scroll">
+      <table>
+        <tr><th>Driving score</th><td>19.62</td></tr>
+        <tr><th>Infraction penalty</th><td>1.00 (none counted)</td></tr>
+        <tr><th>Collisions / red lights / stop signs</th><td>0 / 0 / 0</td></tr>
+        <tr><th>Outside route lanes</th><td>0 %</td></tr>
+        <tr><th>MinSpeedTest</th><td>failed, 128 % (still unexplained)</td></tr>
+        <tr><th>Plans failed</th><td>3 of 192</td></tr>
+        <tr><th>Speed against real time</th><td>0.30x</td></tr>
+      </table>
+    </div>
+    <p class="note">The video runs about 10 % faster than real time: it holds 345 frames (34.5 s) of a 38.4 s route. Trust the time in its bottom bar, which the buttons above also use.</p>
+  </section>
+</div>
+
+<script>
+  const v = document.getElementById('v');
+  document.querySelectorAll('.chapters button').forEach(b => b.addEventListener('click', () => {
+    v.currentTime = parseFloat(b.dataset.t);
+    v.play().catch(() => {});
+  }));
+</script>

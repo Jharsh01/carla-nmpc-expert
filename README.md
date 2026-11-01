@@ -18,7 +18,8 @@ The agent is `expert/agents/simlingo_nmpc_agent.py`: SimLingo's `LingoAgent` wit
 by the NMPC.
 
 The plan: [docs/plan.md](docs/plan.md). How it all works: [docs/architecture.pdf](docs/architecture.pdf). What is
-open: **[docs/todo.md](docs/todo.md)**; what was learned: [docs/learnings.md](docs/learnings.md). Older hand-off
+open: **[docs/todo.md](docs/todo.md)**; what was learned: [docs/learnings.md](docs/learnings.md); run reports:
+[docs/reports](docs/reports/2026-11-01-lane-keeping-and-traffic/README.md). Older hand-off
 notes: [docs/STATUS.md](docs/STATUS.md). Where the code came from: [PROVENANCE.md](PROVENANCE.md).
 
 ## Layout

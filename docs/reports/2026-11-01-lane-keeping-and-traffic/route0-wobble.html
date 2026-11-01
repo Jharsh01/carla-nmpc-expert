@@ -1,0 +1,124 @@
+<title>Route 0 Wobble</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track replay sheet. The video is the page; the wobble analysis sits under it as a log. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --sl: #1f8a3a; --plan: #b5179e; --ref: #6a7570;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+header { display: grid; gap: 8px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+video { display: block; width: 100%; max-width: 100%; aspect-ratio: 1920 / 604; background: #000; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 400 13px/1.4 var(--mono); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 7px; vertical-align: middle; background: var(--c); }
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chapters button { font: 500 13px/1.3 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 11px; cursor: pointer; text-align: left; }
+.chapters button:hover { border-color: var(--accent); }
+.chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chapters b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n { white-space: nowrap; }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 72ch; }
+code { font: 400 14px var(--mono); }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+.note { color: var(--muted); font-size: 14px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Why the car wobbles on route 0</h1>
+    <div class="meta">bench2drive_00 · ParkingCutIn · Town12 · simlingo_nmpc --no-cot --fast · 31 Oct 2026 · this run: 100 %, no infractions</div>
+  </header>
+
+  <div>
+    <video id="v" controls playsinline preload="auto">
+      <source src="route0_overlay.mp4" type="video/mp4">
+    </video>
+    <div class="legend">
+      <span style="--c: var(--sl)">SimLingo's path (dots are its points)</span>
+      <span style="--c: var(--ref)">path the NMPC got, including the lane beyond SimLingo</span>
+      <span style="--c: var(--plan)">NMPC plan, 2 s (red when the solve failed)</span>
+    </div>
+    <div class="chapters" aria-label="Jump to a moment">
+      <button data-t="5.1"><b>6 s</b>weave at 8 m/s, past parked cars</button>
+      <button data-t="11"><b>13 s</b>stops for the cut-in car</button>
+      <button data-t="20.5"><b>24 s</b>second, strongest weave</button>
+    </div>
+  </div>
+
+  <section>
+    <h2>The main cause: the path is forced through the car</h2>
+    <p>SimLingo's line stays steady on the road. The car weaves around it. <code>simlingo_ref.path_points</code> makes every path pass through the car's own position, so whenever the car is even 5 cm off the line, the path has to bend sharply to rejoin it right in front of the bumper. The NMPC then steers to follow that bend, which moves the car off the line again for the next plan.</p>
+    <div class="scroll">
+      <table>
+        <tr><th>Measured on this run, moving</th><th>With the kink</th><th>Kink removed</th></tr>
+        <tr><td>Path heading against the car's (RMS)</td><td class="n bad">8.06°</td><td class="n good">1.42°</td></tr>
+        <tr><td>Commanded steering (RMS)</td><td class="n bad">0.068 rad</td><td class="n good">0.037 rad (−46 %)</td></tr>
+        <tr><td>Steering change from plan to plan (RMS)</td><td class="n bad">0.079 rad</td><td class="n good">0.046 rad (−42 %)</td></tr>
+      </table>
+    </div>
+    <p class="note">The right-hand figures come from re-solving 103 logged plans offline. Each solve used the logged car state with no other cars in the scene, so the car did not actually drive this way. Those replays match the logged steering only moderately (correlation 0.74), so read the size of the drop as approximate. Road curvature in the first 6 m of the path is also 4–5× what it is over the next 12 m (median 0.047 against 0.013 1/m).</p>
+  </section>
+
+  <section>
+    <h2>Other causes, still unmeasured or partial</h2>
+    <ol>
+      <li><strong>Steering jumps at each new plan.</strong> 48 % of all steering movement happens on the 25 % of ticks that start a new plan. The biggest jumps (95th percentile) are 0.125 rad in one tick, while the plan's own 0.6 rad/s limit allows 0.03. The kink causes part of this, since removing it cut these changes by 42 %.</li>
+      <li><strong>Failed solves are still driven.</strong> 5 of 106 plans failed while moving, and the agent uses a failed plan anyway. Some of them fall inside the weaves, at 6.95 s and 7.15 s.</li>
+      <li><strong>Parked cars and the cut-in car.</strong> The worst steering is at 6–8 s and 24–28 s, and the first weave is beside parked cars. About a quarter of the logged steering's variation isn't reproduced by a replay without actors, and they are one possible reason. I haven't separated this out.</li>
+      <li><strong>Car response.</strong> The yaw rate follows steering closely (correlation 0.93, 0.05 s lag) but at 0.77 of what a 2.87 m wheelbase predicts. I assumed that wheelbase here, so this needs checking against the NMPC's model.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Ruled out</h2>
+    <div class="scroll">
+      <table>
+        <tr><th>Suspect</th><th>Result</th></tr>
+        <tr><td>SimLingo's path jumping</td><td>Each new prediction lands 6–8 cm (RMS) from the old one at 2–10 m ahead, on the same spot of road.</td></tr>
+        <tr><td>SimLingo's 1 Hz update</td><td>Steering moves less right after an update in the stalled run (0.47 vs 0.82 rad/s) and the same in the 100 % run (0.44 vs 0.45).</td></tr>
+        <tr><td>Odometry</td><td>Off by 3 cm forward, 5 cm sideways and 0.02° over each hold, against true pose. The signs are right.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Size of the wobble, and limits of this run</h2>
+    <p>In this run the car's heading swings 1.5° RMS and up to 6.2° around its 3-second average, with a half-cycle of about 1.2 s. The earlier stalled run had much stronger steering: 95th-percentile lateral acceleration of 4.4 m/s² against 1.4 m/s² here.</p>
+    <p>This run finished, so it doesn't show why the car stalled. Route 0 has now given 100 %, 91 %, 19.6 % and 100 % on the same code.</p>
+    <p class="note">The video plays about 15 % faster than real time because some frames are missing (249 frames, 24.9 s, for a 29 s route). Trust the time in the bottom bar. The lines are drawn from the latest plan and moved with the car's true pose, so they update 5 times a second.</p>
+  </section>
+</div>
+
+<script>
+  const v = document.getElementById('v');
+  document.querySelectorAll('.chapters button').forEach(b => b.addEventListener('click', () => {
+    v.currentTime = parseFloat(b.dataset.t);
+    v.play().catch(() => {});
+  }));
+</script>
