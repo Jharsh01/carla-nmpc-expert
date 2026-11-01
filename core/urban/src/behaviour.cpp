@@ -179,6 +179,7 @@ Decision Behaviour::step(const Scene& sc) {
         const bool aligned = tr.cos_rel > 0.5, opposed = tr.cos_rel < -0.5;
         const bool crossing_kind = a.kind == Actor::walker || (!aligned && !opposed);
         const bool ahead_now = tr.s[0] - tr.ext_s[0] > front0 - 0.5;
+        const bool behind_now = tr.s[0] + tr.ext_s[0] < rear0;  // all of it
         const double reach = a.kind == Actor::object || a.parked ? opt.blocker_overlap : 0.0;  // into the lane
         const bool in_now = in_lane(tr.s[0], tr.e[0], tr.ext_e[0] - reach);
         // the samples in the lane, not all behind the car
@@ -195,8 +196,10 @@ Decision Behaviour::step(const Scene& sc) {
             for (size_t i : inside) c.s_lo = std::min(c.s_lo, tr.s[i] - tr.ext_s[i]), c.s_hi = std::max(c.s_hi, tr.s[i] + tr.ext_s[i]);
             crossers.push_back(c);
             out.notes.push_back(fmt("crosser in the lane from %.1f s to %.1f s at s %.1f m", c.t_in, c.t_out, c.s_lo));
-        } else if (!crossing_kind && !inside.empty() && (ahead_now || !in_now)) {
-            // a lead (or, opposed, one coming the wrong way down the lane); one cutting in counts from when it does
+        } else if (!crossing_kind && !inside.empty() && !behind_now && (ahead_now || !in_now)) {
+            // a lead (or, opposed, one coming the wrong way down the lane); one cutting in counts from when it does.
+            // Not one behind the car: reaching where the car is now is not cutting in, the car will have moved on.
+            // One that overtakes and cuts in counts once it is level.
             Lead lead;
             const double t_in = tr.t[inside.front()];
             for (size_t i = 0; i < n; ++i) {

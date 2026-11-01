@@ -23,11 +23,20 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
 1. **Route 8 hung once:** results/bench2drive/intent_a stopped ticking at 38.75 s with 47 of 192 plans failed, and the run
    sat until the script's 3600 s timeout. It was on the wrong lane then (learnings.md), but nothing says what hung. The
    route's `timeout 3600` also costs an hour each time; consider less.
-2. **Route 0: 15 of 15 at 100 % with lane keeping (13 of them after the height fix), against 100, 91, 19.6, 100 %
-   before.** But the runs are not independent (learnings.md): the runs gave only 3 different drives. Actor 3697 is also predicted to travel 3715 m in 5 s at 18 s (routes 1 and 10 have 5357 m and 5574 m too): a bad prediction, the car stops around then. Too few to call it fixed.
-   The -7 m/s² brake is still there in all three, so check the false cut-in from the car behind (every note `s 0.0 m`;
-   likely an actor behind the path's start, `behaviour.cpp:187`, not confirmed by a test). The stalled runs ended at rest
-   with plans at -1.2 m/s² and full lock, and that was never explained.
+2. **Route 0 could still stall for good** (analysed 1 Nov, learnings.md). The car behind as a cut-in and the phantom are fixed
+   (two runs of route 0: 100 % in about 22.6 s, at most one stop, for the real cut-in), which also takes away the stop beside
+   parked cars at 18.7 s. Left:
+   a. **Stuck beside parked cars.** The way past is 8 cm wide (e -0.23 to -0.15). A stop there, say for a real cut-in, could still
+      be for good. A clearance already broken at t = 0 should not hold the car: open it for what the car occupies now, as line 457
+      does for leads, or use boxes for parked cars. Then test from rest at e = 0 beside a row. Check too that a blocker level
+      with the car cannot pin it the same way (`stay_behind`).
+   b. **The brake under 6.5 m/s** is 26 m/s² in first gear. Model it or avoid it (the table's median hides it).
+   c. **A crossing-kind actor behind the car** still goes through `inside`, against where the car's rear is now, so it can set a
+      gate as the car behind did; not seen in a run. Actor 3705 on route 1 (alive, 58 m ahead, 491 m predicted over 2 plans, in
+      older runs too) is another bad prediction, not yet looked at.
+   d. Repeat route 0 with the fixes: repeat runs are not independent (learnings.md), and this is one run.
+   video_route0_oct31's stall is still unexplained: its log has no path, and the full lock there was not reproduced. The new logs
+   have the path, so the next one can be replayed.
 3. **The path is still forced through the car while following SimLingo** (`simlingo_ref.path_points`, the kink in
    learnings.md), so turns and lane changes can weave as the old path did. Use `_path`'s lane-keeping idea there too:
    keep SimLingo's line where it is and let the NMPC see the offset. Also open: the agent drives failed plans (13 of 140

@@ -123,8 +123,8 @@ class Actors:
         """Update the tracks with what is visible now."""
         ego_tr = self.hero.get_transform()
         eye = self.carla.Location(ego_tr.location.x, ego_tr.location.y, ego_tr.location.z + 2.5)
-        candidates = list(self.world.get_actors().filter("vehicle.*")) + list(self.world.get_actors().filter("walker.*")) + \
-            list(self.world.get_actors().filter("static.prop.*"))
+        listed = self.world.get_actors()
+        candidates = list(listed.filter("vehicle.*")) + list(listed.filter("walker.*")) + list(listed.filter("static.prop.*"))
         for actor in candidates:
             if actor.id == self.hero.id:
                 continue
@@ -151,9 +151,10 @@ class Actors:
                 track.length, track.width = PARKED_CAR
             track.last_seen = t
             track.actor = actor
-        # tracks lapse `keep` seconds after last seen; an actor the scenario has removed is gone at once (CARLA
-        # answers nothing about it any more)
-        for aid in [a for a, tr in self.tracks.items() if t - tr.last_seen > self.keep or not tr.actor.is_alive]:
+        # tracks lapse `keep` seconds after last seen; an actor the scenario has removed is gone at once. Only the list
+        # tells: to any handle but the one that destroyed it, it stays is_alive and sits at the world's origin, no error
+        present = {actor.id for actor in candidates}
+        for aid in [a for a, tr in self.tracks.items() if t - tr.last_seen > self.keep or a not in present]:
             del self.tracks[aid]
 
     # ---- prediction

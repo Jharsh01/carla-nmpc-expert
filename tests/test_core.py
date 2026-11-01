@@ -55,3 +55,52 @@ def test_urban_nmpc_stops_at_a_gate():
     assert plan.x[-1, 3] < 0.5  # at rest by the end
     assert max(plan.slack_max) < 1e-3
     assert list(expertctl.UrbanNMPC.groups()) == ["corridor", "movers", "ahead", "behind", "grip", "headway"]
+
+
+def _behaviour_and_scene(v):
+    """A straight lane, 15 m of path behind the car as the agent builds it, planning as the agent does (2 s ahead)."""
+    route = expertctl.Path.from_waypoints([[x, 0.0] for x in range(-15, 200, 5)], False)
+    params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
+    options = expertctl.UrbanOptions()
+    options.a_min = -7.0
+    options.horizon, options.fine = 2.0, 1.0
+    options.h_fine, options.h = 0.05, 0.2
+    behaviour_options = expertctl.BehaviourOptions()
+    behaviour_options.pool = 1
+    behaviour = expertctl.Behaviour(route, params, expertctl.Body(), options, behaviour_options)
+    scene = expertctl.Scene()
+    scene.ego = expertctl.Ego(x=0.3, v=v)
+    scene.v_max = 8.33
+    return behaviour, scene
+
+
+def _car(x, y, vx, vy=0.0):
+    car = expertctl.Actor()
+    car.id, car.kind = 1, expertctl.Actor.Kind.vehicle
+    car.length, car.width = 4.7, 1.9
+    car.t = [0.25 * i for i in range(21)]
+    car.x = [x + vx * t for t in car.t]
+    car.y = [y + vy * t for t in car.t]
+    car.psi = [0.0] * len(car.t)
+    return car
+
+
+@pytest.mark.parametrize("gap, speed", [(18.0, 9.3), (20.0, 9.3), (22.0, 9.3), (20.0, 7.9)])
+def test_a_car_behind_is_not_a_cut_in(gap, speed):
+    """Bench2Drive route 0: a car following 18-22 m back, off the path's start, read as cutting in where the car's
+    rear is now, and it stopped the car dead in an empty lane."""
+    behaviour, scene = _behaviour_and_scene(7.9)
+    scene.actors = [_car(0.3 - gap, 0.0, speed)]
+    decision = behaviour.step(scene)
+    assert not any("cut-in" in note for note in decision.notes)
+    assert decision.plan.x[:, 4].min() > -1.0  # no braking
+    assert decision.plan.x[-1, 3] > 7.0
+
+
+def test_a_car_level_with_the_car_can_still_cut_in():
+    """Beside the car, not behind it, and moving into the lane ahead of it: braking is the right answer."""
+    behaviour, scene = _behaviour_and_scene(7.9)
+    scene.actors = [_car(5.0, 3.0, 4.0, -1.5)]
+    decision = behaviour.step(scene)
+    assert any("cut-in" in note for note in decision.notes)
+    assert decision.plan.x[:, 4].min() < -1.0

@@ -46,12 +46,27 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The world model and CARLA
 
+- **A destroyed actor looks alive, at the world's origin, to every handle but the one that destroyed it** (checked on CARLA 0.9.15,
+  1 Nov). `is_alive` stays True for good, `get_location()` gives (0, 0, 0) with no error, and it leaves `get_actors()` one tick
+  later. On the destroying handle reads raise. So the list is the only test: tracks not in it are dropped at once (`Actors.detect`).
+- **A destroyed actor stayed in the scene for 1.5 s as a phantom crossing car** (fixed 1 Nov; route 0: 15 of 43 stops). The scenario
+  destroys the cut-in car after 30 m (`parking_cut_in.py`). Its track was kept for `keep` with its last position and speed,
+  so `_follow_lane` ran (`actors.py:197`) on the origin: the waypoint is a road near the origin, and the fading offset takes the prediction from the old position at
+  t = 0 to that road. So the "3715 m in 5 s" of actor 3697 is the distance to the origin: predicted metres less distance to
+  the origin is 85 m on all of route 0's runs and 81-86 m for each stream car on route 1. It lasts 7 plans each time. The first
+  sample's heading is that road's, so it reads as a crosser "in the lane from 0.0 s to 0.0 s", 12 m ahead and standing still; the
+  car brakes for nothing, as replayed offline. On route 1 it fires for every stream car, every 3 s.
+- **Under about 6.5 m/s the brake is 26 m/s², not 7.** Below it the gearbox drops to first and the car sheds 1.3 m/s a tick
+  (results/identify/runs.csv, brake from 7.5 m/s; the same on route 0: -7 asked, -20 measured, the pose agreeing). It holds with the
+  brake at 0.03, and in the identify runs brake levels from 0.1 reach 21 m/s². `_clean`'s median hides it: the raw table's
+  -17.4 at 7.5 m/s is taken for noise. The plan does not know: a slow-down it asks for ends at rest, and every stop here is
+  a skid to a stop in about 0.3 s. Tyre friction is 3.5.
 - **CARLA's bounding boxes for `static.prop.mesh` actors are wrong.** Bench2Drive spawns its background parked cars
   that way (`route_scenario.py`, `spawn_parked_vehicles`). A 5 m Charger reports half-extents 1.48 × 1.94 m; on
   Town12 they came out 2.0 × 4.3 m, a car turned sideways across the lane. Decision: take them as 4.8 × 2.0 m parked
   cars along the actor's heading.
-- **Actors vanish mid-tick.** The scenario destroys actors in the same tick the world model reads them, and
-  `is_alive` can still say True. Any CARLA error on an actor now drops its track.
+- **Actors vanish mid-tick.** The scenario destroys actors in the same tick the world model reads them. Any CARLA
+  error on an actor drops its track.
 - **The leaderboard adds GNSS noise** of 5e-6° per axis (about 0.5 m per sample), unbiased.
 - **The scenario plant is not the dynamic bicycle.** `sim/urban/scenarios.cpp` uses its own kinematic bicycle with
   a 0.25 s lag on acceleration and a 0.05 s rate-limited lag on steering. The dynamic bicycle and tyre model drove
@@ -59,6 +74,36 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The NMPC and the behaviour layer
 
+- **Without the two false stops route 0 does not stop at all; route 1 does not get better** (results/bench2drive/fix_rear_ghost,
+  fix_ghost_only, fix_rear_ghost_70s, 1 Nov; one run each). Route 0: no rest after the start, 22.5 s against 30.55, 100 %, plans
+  failed 3 of 112 against 13 of 153, slowest 1.1 m/s, for the real cut-in. Route 1, to 70 s: 30.3 % before, 27.3 % with the phantom
+  fix, 24.3 % with both, all behind the same parked car (33-41 m), so the fixes do not solve it and may cost a little: the false
+  notes let it edge on between stream cars. With the at-rest watchdog on it ends at 43.85 s on 21.3 %, as the odd creep no
+  longer resets the watchdog. Cars from behind are now movers, which is what holds it (todo 0). A second run with both fixes
+  (results/bench2drive/fix_video, Epic quality, the runs above Low): route 1 30.3 %, 42.5 m by 20 s then at rest for 52 s, so the
+  differences above are noise, not a cost of the fixes. Route 0 100 % in 22.7 s, with one stop of 0.5 s at 9.5 s for the real
+  cut-in: it can still come to rest, and the zero stops of the first run are not a guarantee.
+- **A car 18-22 m behind made the car stop dead in an empty lane** (fixed 1 Nov: `behind_now`; route 0, 25 of 43 stops in the 15
+  lane-keeping runs; reproduced offline on the real `Behaviour`). `project` (behaviour.cpp:114) gives a car behind the path's start
+  e = its distance, so it is "not in the lane now"; its prediction then enters the lane, and `inside` (:187) compares that
+  with where the car's rear is now, as if the car would stay there, so it counts as a cut-in (:198). The lead sits behind the
+  car and is clamped to `front_now + gap_min` (urban_nmpc.cpp:457). It bites once `t_in` is inside the 2 s horizon: `a_ref` went
+  +0.44 at 2.2 s, -4.15 at 2.0 s. Offline at 7.9 m/s: no effect at under 18 m (a mover) or over 22 m (past the horizon), a
+  -7 plan to a stop between, even for a follower at the car's own speed, which can never catch it. Every note `s 0.0 m`.
+- **A car at rest inside a parked car's clearance stays there for good** (reproduced offline in closed loop on
+  video_route0's logged scene: 0 m in 12 s). A parked car needs 1.31 + 1.28 + 0.2 = 2.79 m between circle centres; in the lane
+  at 2.64 m that is e <= -0.15, and the corridor gives e >= -0.23, so the slot past a row of parked cars is 8 cm wide.
+  At speed the plan threads it. From rest outside it, going forward deepens the slack, so the plan stays or reverses,
+  v(1 s) < 0.2, and the car never moves, with the hold rule on or off. From e -0.15 it drives off; from -0.10 it moves 1 m. Stopping
+  where no parked car is alongside is fine (26.4 s, a gap in the row, any e). The old path started at the car, so e was
+  always 0 there, which is why those runs stalled and lane keeping does not: the nudge survives. All 15 runs still stop at
+  18.7 s beside parked cars at e about -0.14, a few cm from it, so 15 of 15 is not a margin. Full lock is not the cause:
+  the scene stays stuck from 0 or -0.95, and neither is gravity in the IMU (`a` reads -0.16 at every rest, `a_ref` -1.00 is the
+  hold rule). Not reproduced: video_route0_oct31's own stall (nothing near in the logged scene; that log has no path).
+- **Five of route 0's seven 30 s stalls were false blockers.** timing_route0, _async, _b, _c and _h2 (lane bands 3.5-5.3 m
+  wide, before the road-edge fix) took a parked car beside or just ahead of the car as a blocker. `stay_behind` puts the lead
+  4 m behind the blocker's rear, level with the car or behind it, and it is clamped as above, so the car can never move
+  (reproduced on timing_route0_h2's scene, and it drives with the true lane). The other two are the bullet above.
 - **In steady traffic the behaviour layer holds the car, not SimLingo** (results/bench2drive/intent_z, 31 Oct). SimLingo
   asks to stop on 17-28 % of plans on routes 1, 8 and 10. Routes 8 and 10 have a stream about 2 s apart, every plan
   has a crosser within 3 s, and `gate_buffer` widens each gate 1 s either side, so no gap is left. On route 8, 145 of 145
