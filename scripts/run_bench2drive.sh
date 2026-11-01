@@ -18,6 +18,7 @@
 #                                                    one from above, not seen by the agent) into
 #                                                    videos/<route>_<scenario>.mp4, real time, with the NMPC's log
 #                                                    under them (scripts/make_video.py)
+#   scripts/run_bench2drive.sh --keep-frames         with --video: keep the camera frames, to remake the video
 #   scripts/run_bench2drive.sh --no-cot              no commentary before the waypoints (about 3x faster)
 #   scripts/run_bench2drive.sh --agent simlingo_nmpc --live
 #                                                    watch the NMPC's solves live in a browser (expert/live_view.py):
@@ -49,7 +50,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 
-routes=all seed=1 tries=2 debug=0 cot=1 fast=0 agent=simlingo max_stopped=30 max_time=70 live=0 out= record=0
+routes=all seed=1 tries=2 debug=0 cot=1 fast=0 agent=simlingo max_stopped=30 max_time=70 live=0 out= record=0 keep_frames=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --routes) routes=$2; shift ;;
@@ -58,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --tries) tries=$2; shift ;;
         --debug) debug=1 ;;
         --video) record=1 ;;
+        --keep-frames) keep_frames=1 ;;
         --no-cot) cot=0 ;;
         --fast) fast=1 ;;
         --max-stopped) max_stopped=$2; shift ;;
@@ -171,7 +173,8 @@ EOF
         mkdir -p "$out_root/videos"
         scenario=$("$VPY" -c "import sys, xml.etree.ElementTree as ET; print(next(ET.parse(sys.argv[1]).iter('scenario')).get('type'))" "$route")
         "$VPY" "$REPO/scripts/make_video.py" "$out_root/viz/$name" "$out_root/videos/${name#bench2drive_}_$scenario.mp4" \
-            --title "$name  $agent" | sed 's/^/   video: /' && rm -rf "$out_root/viz/$name/video"
+            --title "$name  $agent" | sed 's/^/   video: /'
+        [[ $keep_frames == 1 ]] || rm -rf "$out_root/viz/$name/video"
     fi
     if [[ $debug == 1 ]]; then  # the agent's frames (every 5th step) into one video, real time
         frames=$(find "$out_root/viz" -type d -path "*/${name}_*/images" | sort | tail -1)

@@ -46,6 +46,12 @@ def speed_reference(speed_wps, age=0.0):
     return list(map(float, t[keep:])), list(map(float, v[keep:]))
 
 
+def asks_to_stop(v_ref_t, v_ref, within=2.0, below=1.0):
+    """Whether speeds from speed_reference come down to a stop: under `below` m/s in the next `within` seconds, past
+    the first half second (from rest the first interval is short however fast it is asked to go)."""
+    return any(0.5 <= t <= within and v < below for t, v in zip(v_ref_t, v_ref))
+
+
 def carry(points_ego, pose):
     """SimLingo's car-frame points (y right) from an earlier prediction, in the car's frame now: `pose` is where the
     car is now in the prediction's frame (y left), as Odometry keeps it."""

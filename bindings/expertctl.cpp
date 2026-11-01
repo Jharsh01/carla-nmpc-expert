@@ -234,6 +234,16 @@ PYBIND11_MODULE(expertctl, m) {
     BFIELD(pass_penalty); BFIELD(slack_ok);
 #undef BFIELD
 
+    py::class_<ex::PathIntent>(m, "PathIntent")
+        .def(py::init<>())
+        .def_readwrite("from_", &ex::PathIntent::from)
+        .def_readwrite("enter", &ex::PathIntent::enter)
+        .def_readwrite("exit", &ex::PathIntent::exit)
+        .def_readonly("manoeuvre", &ex::PathIntent::manoeuvre)
+        .def_readonly("offset", &ex::PathIntent::offset)
+        .def("update", &ex::PathIntent::update, py::arg("s"), py::arg("e"))
+        .def("reset", &ex::PathIntent::reset);
+
     py::class_<ex::Behaviour>(m, "Behaviour")
         .def(py::init<Path, VehicleParams, Body, Opt, BOpt>(), py::arg("route"), py::arg("params"),
              py::arg("body") = Body(), py::arg("nmpc_options") = Opt(), py::arg("options") = BOpt(),

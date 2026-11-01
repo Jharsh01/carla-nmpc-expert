@@ -52,6 +52,17 @@ Behaviour::Behaviour(Path route_, VehicleParams params, Body body_, UrbanNMPC::O
     }
 }
 
+bool PathIntent::update(const std::vector<double>& s, const std::vector<double>& e) {
+    double largest = -1.0;
+    for (size_t i = 0; i < s.size() && i < e.size(); ++i)
+        if (s[i] >= from) largest = std::max(largest, std::abs(e[i]));
+    if (largest < 0.0) return manoeuvre;  // too short to tell
+    offset = largest;
+    if (offset > enter) manoeuvre = true;
+    else if (offset < exit) manoeuvre = false;
+    return manoeuvre;
+}
+
 Behaviour::~Behaviour() = default;
 
 void Behaviour::reset() {

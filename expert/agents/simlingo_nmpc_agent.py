@@ -17,7 +17,9 @@ SIMLINGO_EVERY ticks (1 Hz) that tick's camera is sent to it, and its prediction
 later, as a car would get it, so the simulation goes on while it thinks; in between, the last prediction is held,
 its path carried into the car's frame now by odometry and its speeds taken from the prediction's age on. Every
 PLAN_EVERY ticks a new path, the scene and a behaviour step (core/urban), the step solved on the NMPC's own CPUs and
-its plan taken NMPC_LATENCY ticks later; then the plan sampled a little ahead (by the actuation's lags) for the
+its plan taken NMPC_LATENCY ticks later. SimLingo's path is planned along only while it is a manoeuvre, a lane change
+or a turn (it leaves the lane the car is in: expertctl.PathIntent); otherwise the NMPC keeps to the lane's centre, and
+SimLingo's speeds count only when they ask to stop. Then the plan sampled a little ahead (by the actuation's lags) for the
 acceleration and road-wheel angle, and those as throttle, brake and steer (expert/mkz_actuation.py). Both latencies
 are counted in ticks, not wall-clock time, so a run does not depend on how fast the machine is: if a result is not
 ready when due, the tick waits for it. SimLingo's restart creep (forced throttle after a long stop) is off: the NMPC
@@ -130,9 +132,11 @@ class _Worker:
 class _Job:
     """A behaviour step being solved on the NMPC's thread, with the scene it was made from (for the log)."""
 
-    def __init__(self, future, tick, t, scene, path, s_now, s_simlingo):
+    def __init__(self, future, tick, t, scene, path, s_now, s_simlingo, frame, route, intent):
         self.future, self.tick, self.t = future, tick, t
         self.scene, self.path, self.s_now, self.s_simlingo = scene, path, s_now, s_simlingo
+        self.frame, self.route = frame, route  # the car's true pose then; SimLingo's path carried to it (y right)
+        self.intent = intent  # for the log: [a manoeuvre, SimLingo's offset from the lane, it asks to stop]
 
 
 class SimLingoNMPCAgent(LingoAgent):
@@ -252,6 +256,8 @@ class SimLingoNMPCAgent(LingoAgent):
         self.plan = self.decision = self.job = None
         self.t_plan = 0.0
         self.steer = self.a_filtered = 0.0
+        self.logged_step = None  # the last prediction written to the log
+        self.intent = expertctl.PathIntent()
         save = os.environ.get("SAVE_PATH")
         if save:
             route = os.path.basename(os.environ.get("ROUTES", "route")).replace(".xml", "")
@@ -266,6 +272,18 @@ class SimLingoNMPCAgent(LingoAgent):
             except OSError as e:
                 print(f"NMPC live view not started: {e}", flush=True)
         self.started = True
+
+    def _path(self, route, frame, ego):
+        """The path for this plan and where SimLingo's part of it ends: the lane the car is in, unless SimLingo's path
+        leaves it. `route`: SimLingo's path in the car's frame now (y right)."""
+        lane = self.route.lane_path(frame)
+        if lane is not None:
+            s_now = lane.project(ego.x, ego.y)[0]
+            points = [lane.project(float(x), float(-y)) for x, y in route]
+            self.intent.update([p[0] - s_now for p in points], [p[1] for p in points])
+            if not self.intent.manoeuvre:
+                return lane, points[-1][0]
+        return self.route.path(simlingo_ref.path_points(route), frame)
 
     def _plan_at(self, tau, i):
         return float(np.interp(tau, self.plan.times, self.plan.x[:, i]))
@@ -287,7 +305,7 @@ class SimLingoNMPCAgent(LingoAgent):
         if submitted:
             with timing.stage("nmpc.path"):
                 frame = frames.Frame.of(self.hero.get_transform())  # the world model's, to report in the car's frame
-                path, s_simlingo = self.route.path(simlingo_ref.path_points(route), frame)
+                path, s_simlingo = self._path(route, frame, ego)
             with timing.stage("nmpc.set_route"):  # the first: the solver's set-up (and compile, on a fresh cache)
                 if self.behaviour is None:
                     self.behaviour = expertctl.Behaviour(path, self.params, self.body, self.nmpc_options,
@@ -303,6 +321,9 @@ class SimLingoNMPCAgent(LingoAgent):
             scene.ego = ego
             scene.v_max = max(1.0, self.hero.get_speed_limit() / 3.6)  # a stand-in for reading the signs
             scene.v_ref_t, scene.v_ref = simlingo_ref.speed_reference(self.held[0], age=(self.step - self.held_step) * DT)
+            stop = simlingo_ref.asks_to_stop(scene.v_ref_t, scene.v_ref)
+            if not self.intent.manoeuvre and not stop:  # the limit, for the actors and the rules to bring down
+                scene.v_ref_t, scene.v_ref = [], []
             scene.line_s, scene.line_e = [0.0, path.length], [0.0, 0.0]  # SimLingo's path itself
             with timing.stage("nmpc.lanes"):
                 scene.lanes = self.route.lanes(path, frame)
@@ -311,7 +332,7 @@ class SimLingoNMPCAgent(LingoAgent):
             with timing.stage("nmpc.stops"):
                 scene.stops = self.route.stops(path, s_now, frame)
             self.job = _Job(self.nmpc_thread.submit(self.behaviour.step, scene), self.ticks, t, scene, path, s_now,
-                            s_simlingo)
+                            s_simlingo, frame, route, [self.intent.manoeuvre, round(self.intent.offset, 3), stop])
         job = None
         if self.job is not None and (self.plan is None or self.ticks - self.job.tick >= NMPC_LATENCY):
             job, self.job = self.job, None
@@ -341,8 +362,12 @@ class SimLingoNMPCAgent(LingoAgent):
                    "throttle": throttle, "brake": brake, "steer": steer, "label": self.decision.label,
                    "step_ms": 1e3 * self.decision.wall_time if job else 0.0, "success": self.decision.plan.success,
                    "n_actors": len(self.actors.tracks), "notes": list(self.decision.notes) if job else []}
+            true = frames.Frame.of(self.hero.get_transform())
+            row["pose"] = [round(true.x, 3), round(true.y, 3), round(true.psi, 5)]  # for the video and analysis only
+            row["held"] = [self.held_step, *(round(v, 3) for v in self.held_odometry.pose())]
             if job:  # a new plan: the scene it was made from, at its time (t_plan)
                 row.update(self._describe(job.scene, job.path, job.s_now, job.s_simlingo))
+                row.update(self._geometry(job))
             self.log_file.write(json.dumps(row) + "\n")
         return steer, throttle, brake
 
@@ -363,6 +388,24 @@ class SimLingoNMPCAgent(LingoAgent):
                           "stops": [[str(st.kind).split(".")[-1], round(st.s - s_now, 1)] for st in scene.stops],
                           "simlingo_reach": round(s_simlingo - s_now, 1)},
                 "override": [round(float(np.max(np.abs(self.plan.x[early, 1]))), 3), round(dv, 3)]}
+
+    def _geometry(self, job):
+        """The plan's lines for the video and analysis, in the car's frame (y left) at the true pose `frame`: SimLingo's
+        path carried there, the path the NMPC got (from 15 m behind, every metre, 40 m ahead), its plan; and each
+        prediction as SimLingo made it (y right), once."""
+        pose = [job.frame.x, job.frame.y, job.frame.psi]
+        q = [job.path.pose(float(s)) for s in np.arange(max(0.0, job.s_now - 15.0), min(job.path.length, job.s_now + 40.0), 1.0)]
+        plan = [job.path.pose(float(s), float(e)) for s, e in self.plan.x[:, :2]]
+        row = {"frame": [round(float(v), 3) for v in pose[:2]] + [round(float(pose[2]), 5)],
+               "simlingo": np.round(np.asarray(job.route) * [1.0, -1.0], 3).tolist(),
+               "path": [[round(p.x, 3), round(p.y, 3)] for p in q],
+               "plan_xy": [[round(p.x, 3), round(p.y, 3)] for p in plan], "s_now": round(job.s_now, 3),
+               "intent": job.intent}
+        if self.held_step != self.logged_step:
+            self.logged_step = self.held_step
+            row["prediction"] = {"step": self.held_step, "route": np.round(self.held[1], 3).tolist(),
+                                 "speed_wps": None if self.held[0] is None else np.round(self.held[0], 3).tolist()}
+        return row
 
     def _write_metric_info(self):
         with open(f"{self.save_path_metric}/metric_info.json", "w") as f:

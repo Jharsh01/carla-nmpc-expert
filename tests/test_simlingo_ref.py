@@ -182,3 +182,22 @@ def test_live_view_serves_a_plan():
         stream.close()
     finally:
         view.close()
+
+
+def test_path_intent_is_measured_from_the_lane_with_hysteresis():
+    intent = expertctl.PathIntent()
+    s = [0.0, 4.0, 8.0, 12.0, 18.0]
+    assert not intent.update(s, [0.6, 0.4, 0.2, 0.1, 0.0])  # the car off the lane, its path rejoining it
+    assert not intent.update(s, [3.0, 3.0, 0.2, 0.1, 0.0])  # near the car does not count
+    assert intent.update(s, [0.0, 0.1, 0.4, 1.2, 2.5])  # a lane change
+    assert intent.offset == pytest.approx(2.5)
+    assert intent.update(s, [0.0, 0.1, 0.2, 0.5, 0.7])  # between exit and enter: still
+    assert intent.update([0.0, 4.0], [0.0, 0.0])  # too short to tell: as it was
+    assert not intent.update(s, [0.0, 0.0, 0.1, 0.2, 0.3])
+
+
+def test_asks_to_stop():
+    t = [0.1, 0.6, 1.1, 1.6, 2.6]
+    assert not simlingo_ref.asks_to_stop(t, [0.4, 3.0, 4.0, 4.0, 0.0])  # moving off; a stop past the window
+    assert simlingo_ref.asks_to_stop(t, [6.0, 4.0, 2.0, 0.5, 0.0])
+

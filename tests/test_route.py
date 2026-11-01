@@ -37,12 +37,16 @@ class _Waypoint:
     def get_right_lane(self):
         return _Waypoint(self._lane.right, self.transform.location.x) if self._lane.right else None
 
+    def next(self, d):
+        return [_Waypoint(self._lane, self.transform.location.x + d)]
+
 
 class _Map:
     def __init__(self, lanes):
         self.lanes = lanes
 
     def get_waypoint(self, loc, project_to_road=True, lane_type=None):
+        self.z = loc.z
         driving = [l for l in self.lanes if l.lane_type == LaneType.Driving]
         return _Waypoint(min(driving, key=lambda l: abs(l.y - loc.y)), loc.x)
 
@@ -112,3 +116,24 @@ def test_a_lane_change_takes_in_both_lanes_only_where_it_is():
     assert _at(sections, 70.0).hi - _at(sections, 70.0).lo > 1.9 * W  # around the change: both lanes
     for s in (10.0, 125.0):  # well before and after it: one lane
         assert _at(sections, s).hi - _at(sections, s).lo == pytest.approx(W, abs=0.1)
+
+
+def test_lane_path_keeps_to_the_lane_and_not_the_car():
+    """The car 0.4 m left of its lane's centre, a little turned: the path is the lane's centre, in the car's frame."""
+    route = _route(_road((-1, 0.0, LaneType.Driving), (1, 180.0, LaneType.Driving)))
+    centre = route.map.lanes[0].y
+    frame = frames.Frame(10.0, -centre + 0.4, 0.05)
+    path = route.lane_path(frame)
+    s, e = path.project(0.0, 0.0)
+    assert e == pytest.approx(0.4, abs=0.02)
+    assert s == pytest.approx(15.0, abs=0.3)
+    assert path.length > 150.0
+    x, y = frame.to_world(path.pose(s + 30.0).x, path.pose(s + 30.0).y)
+    assert y == pytest.approx(-centre, abs=0.02)
+
+
+def test_lanes_are_looked_up_at_the_cars_height():
+    """Town12's roads are 300-380 m up: from z = 0 CARLA gives the lane beside the car on 19 % of its road points."""
+    route = _route(_road((-1, 0.0, LaneType.Driving), (1, 180.0, LaneType.Driving)))
+    route.lane_path(frames.Frame(10.0, -route.map.lanes[0].y, 0.0, 358.0))
+    assert route.map.z == 358.0

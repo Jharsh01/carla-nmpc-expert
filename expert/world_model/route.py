@@ -1,6 +1,6 @@
-"""The road along the route the NMPC plans on, which is SimLingo's predicted path, rebuilt every plan: the path
-continued along the map's lane past SimLingo's last point, the lanes along it and the stop lines on it, all in the
-car's own frame, as the NMPC plans in it. The map and the lights are known in the world, so they are read there
+"""The road along the route the NMPC plans on, rebuilt every plan: the lane the car is in, or, while SimLingo's path
+is a manoeuvre (expertctl.PathIntent), that path continued along the map's lane past SimLingo's last point; the
+lanes along it and the stop lines on it, all in the car's own frame, as the NMPC plans in it. The map and the lights are known in the world, so they are read there
 through the car's true pose (frames.Frame), as a sensor on the car (or an HD map it is localised in) would see them.
 
 SimLingo's path reaches about 20 m. The behaviour layer looks for actors and stops up to 160 m ahead, and the
@@ -22,6 +22,7 @@ from expert import frames
 SPACING = 2.0  # [m] between the lane continuation's points, and between lane samples
 CONTINUE = 160.0  # [m] of lane continuation past SimLingo's last point
 JOIN = 10.0  # [m] over which the continuation joins its lane's centre
+BEHIND = 15.0  # [m] the lane's path reaches behind the car, so that actors and stops just behind it project onto it
 LOOK = 200.0  # [m] stop lines and stop signs further from the car than this are not looked at
 
 
@@ -90,8 +91,10 @@ class Route:
 
     # ---- the path
 
-    def _waypoint(self, x, y):
-        return self.map.get_waypoint(self.carla.Location(*frames.to_carla_xy(x, y), 0.0), project_to_road=True,
+    def _waypoint(self, x, y, z):
+        """The driving lane at (x, y). `z` matters: from far above or below a road the nearest lane is often not the
+        one under the point (Town12's roads are 300-380 m up), so it is the car's height, close enough along a path."""
+        return self.map.get_waypoint(self.carla.Location(*frames.to_carla_xy(x, y), z), project_to_road=True,
                                      lane_type=self.carla.LaneType.Driving)
 
     def continuation(self, frame, x, y, psi):
@@ -100,7 +103,7 @@ class Route:
         x, y = frame.to_world(x, y)
         psi += frame.psi
         out = []
-        wp = self._waypoint(x, y)
+        wp = self._waypoint(x, y, frame.z)
         if wp is not None:
             lane_psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
             forward = math.cos(_angle(lane_psi - psi)) >= 0.0  # the lane runs the way the car goes (not oncoming)
@@ -139,6 +142,21 @@ class Route:
         s_end = path.project(*pts[-1])[0]
         return path, s_end
 
+    def lane_path(self, frame):
+        """The centre of the lane the car is in, from BEHIND metres behind it, along the lane past it. It does not go
+        through the car: the car's offset from it stays the NMPC's to take out. None where the map has no lane."""
+        wp = self._waypoint(frame.x, frame.y, frame.z)
+        if wp is None:
+            return None
+        x, y = _xy(wp.transform.location)
+        psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
+        if math.cos(_angle(psi - frame.psi)) < 0.0:  # in the oncoming lane: along the way the car goes
+            psi += math.pi
+        ahead = self.continuation(frame, *frame.to_car(x, y), psi - frame.psi)
+        c, s = math.cos(psi), math.sin(psi)
+        behind = [frame.to_car(x - d * c, y - d * s) for d in np.arange(BEHIND, -0.1, -2.5)]
+        return self.ex.Path.from_waypoints([list(p) for p in behind + ahead], False)
+
     # ---- the road along it
 
     def lanes(self, path, frame, window=6):
@@ -154,7 +172,7 @@ class Route:
         for s in np.arange(0.0, path.length, SPACING):
             q = path.pose(s)
             across = _Across(*frame.to_world(q.x, q.y), q.psi + frame.psi)  # in the world, where the map is
-            wp = self._waypoint(across.x, across.y)
+            wp = self._waypoint(across.x, across.y, frame.z)
             band = None if wp is None else across.cut(wp)
             if band is None or wp.is_junction:
                 half = 0.5 * (wp.lane_width if wp is not None else 3.5)
