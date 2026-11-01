@@ -1,0 +1,293 @@
+<title>Right Turn Constraints</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track replay sheet. The video is the page; the wobble analysis sits under it as a log. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --sl: #1f8a3a; --plan: #b5179e; --ref: #6a7570;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+header { display: grid; gap: 8px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+video { display: block; width: 100%; max-width: 100%; aspect-ratio: 1920 / 604; background: #000; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 400 13px/1.4 var(--mono); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 7px; vertical-align: middle; background: var(--c); }
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chapters button { font: 500 13px/1.3 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 11px; cursor: pointer; text-align: left; }
+.chapters button:hover { border-color: var(--accent); }
+.chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chapters b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n { white-space: nowrap; }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 72ch; }
+code { font: 400 14px var(--mono); }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+.note { color: var(--muted); font-size: 14px; }
+
+.page { max-width: 1040px; }
+.lead { font-size: 18px; max-width: 64ch; }
+svg { display: block; width: 100%; height: auto; min-width: 560px; }
+.road { fill: var(--panel); } .centre { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 10 8; fill: none; }
+.zebra rect { fill: var(--line); } .stop { stroke: var(--fg); stroke-width: 5; }
+.ego { fill: none; stroke: var(--accent); stroke-width: 4; } .egocar { fill: var(--accent); } .on { fill: var(--bg); font: 500 13px var(--mono); }
+.flow { fill: none; stroke: var(--bad); stroke-width: 3; stroke-dasharray: 7 6; } .flowcar rect { fill: var(--bad); }
+.left { fill: none; stroke: var(--warn); stroke-width: 3; stroke-dasharray: 7 6; } .leftcar { fill: var(--warn); }
+.straight { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 3 7; }
+.walk { fill: none; stroke: var(--plan); stroke-width: 3; stroke-dasharray: 3 5; }
+.zone circle { fill: var(--bg); stroke: var(--fg); stroke-width: 2; } .zone text { fill: var(--fg); font: 500 15px var(--mono); }
+.lab { fill: var(--fg); font: 400 13px var(--mono); } .lab2 { fill: var(--accent); font: 500 13px var(--mono); }
+.grid { stroke: var(--line); stroke-width: 1; } .tick { fill: var(--muted); font: 400 12px var(--mono); }
+.hz { fill: var(--accent); opacity: .12; } .cz { stroke: var(--fg); stroke-width: 2; stroke-dasharray: 8 6; } .car { fill: var(--bad); opacity: .72; }
+.m td, .m th { text-align: center; } .m td:first-child, .m th:first-child { text-align: left; }
+.on1 { background: var(--accent); color: var(--bg); font-weight: 500; } .pre { color: var(--muted); }
+pre { margin: 0; padding: 14px; background: var(--panel); overflow-x: auto; font: 400 13px/1.5 var(--mono); }
+li { min-width: 0; }
+h3 { font: 600 17px/1.2 var(--display); margin: 8px 0 0; }
+td.w { min-width: 190px; }
+</style>
+
+<div class="page">
+<header>
+  <h1>Right turn with oncoming traffic: constraints and a dynamic constraint system</h1>
+  <div class="meta">urban NMPC · right-hand traffic · tested against Bench2Drive route 8 · 1 Nov 2026 · design only, nothing here is implemented</div>
+</header>
+
+<section>
+  <p class="lead">You don't need a solver that adds and removes rows. The NMPC already has a fixed bank of rows that it switches on and off with parameters. The missing piece is a layer above it that turns all the traffic into one space-time tube per plan, so the NMPC gets at most one upper and one lower limit per step, however many cars there are.</p>
+  <ol>
+    <li><strong>Oncoming traffic is rarely the problem on this turn.</strong> In right-hand traffic, oncoming cars going straight never cross your path. The real conflicts are the stream from your left, oncoming cars turning left into your exit, and pedestrians.</li>
+    <li><strong>The car stalls on route 8 because of how it reads the stream.</strong> It treats cars it should merge with as crossers that never clear, so the gate never opens.</li>
+    <li><strong>The 2 s horizon can't see the answer.</strong> From rest the plan reaches 6 m, and the merge point is about 10 m away, so the go-or-wait choice has to be made outside the NMPC.</li>
+    <li><strong>The gap is usable.</strong> Plain SimLingo stopped at the line, then slotted in behind a passing car with no contact. Our margins are what rule that out.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>The scenario</h2>
+  <div class="scroll"><svg viewBox="0 0 760 520" role="img" aria-label="Four-way junction. The ego arrives from the west and turns right into the south exit. Traffic from the left comes down from the north into the same exit. An oncoming left-turner also enters it. Pedestrians cross the exit.">
+<rect x="0" y="170" width="760" height="150" class="road"/><rect x="330" y="0" width="150" height="520" class="road"/>
+<line x1="0" x2="330" y1="245" y2="245" class="centre"/><line x1="480" x2="760" y1="245" y2="245" class="centre"/>
+<line x1="405" x2="405" y1="0" y2="170" class="centre"/><line x1="405" x2="405" y1="320" y2="520" class="centre"/>
+<g class="zebra"><rect x="335" y="330" width="140" height="26"/></g>
+<line x1="318" x2="318" y1="247" y2="320" class="stop"/>
+<path d="M60 283 H250 Q368 283 368 400 V510" class="ego"/>
+<rect x="225" y="270" width="52" height="26" class="egocar"/><text x="251" y="288" text-anchor="middle" class="on">ego</text>
+<path d="M368 10 V510" class="flow" transform="translate(0 0)"/>
+<g class="flowcar"><rect x="356" y="60" width="24" height="46"/><rect x="356" y="150" width="24" height="46"/></g>
+<path d="M705 208 H520 Q368 208 368 400" class="left"/>
+<rect x="600" y="196" width="46" height="24" class="leftcar"/>
+<path d="M740 208 H10" class="straight"/>
+<path d="M300 343 H500" class="walk"/>
+<g class="zone"><circle cx="368" cy="283" r="20"/><text x="368" y="288" text-anchor="middle">1</text>
+<circle cx="368" cy="343" r="20"/><text x="368" y="348" text-anchor="middle">3</text>
+<circle cx="368" cy="400" r="20"/><text x="368" y="405" text-anchor="middle">2</text></g>
+<text x="388" y="56" class="lab">A: stream from the left, into your exit lane</text>
+<text x="500" y="192" class="lab">B: oncoming left-turner, same exit</text>
+<text x="490" y="228" class="lab" >C: oncoming straight: no path crossing</text>
+<text x="512" y="347" class="lab">D: pedestrians</text>
+<text x="20" y="310" class="lab">your path</text>
+<text x="210" y="240" class="lab">stop line</text>
+<text x="396" y="470" class="lab">queue in the exit: E</text>
+</svg></div>
+  <div class="scroll"><table>
+    <tr><th>Who</th><th>Relation to your path</th><th>Conflict type</th><th>Who has priority</th></tr>
+    <tr><td>A. Stream from the left</td><td>Enters your exit lane at zone 1, then runs ahead of or behind you</td><td>Merge</td><td>Them, unless the light gives you the movement</td></tr>
+    <tr><td>B. Oncoming left-turner</td><td>Aims at the same exit lane at zone 2</td><td>Merge</td><td>You, on a shared green. Don't rely on it</td></tr>
+    <tr><td>C. Oncoming straight</td><td>Stays in its own lane</td><td>None</td><td>Drop it. Keep it as a mover only if your swing crosses the centre line</td></tr>
+    <tr><td>D. Pedestrians, cyclists</td><td>Cross the exit at zone 3</td><td>Cross</td><td>Them</td></tr>
+    <tr><td>E. Queue in the exit</td><td>Standing in your exit lane</td><td>Follow</td><td>Don't enter unless your whole body fits behind it</td></tr>
+    <tr><td>F. Cars behind you</td><td>Behind the path</td><td>None</td><td>Never constrains you. This also removes route 0's false brake</td></tr>
+  </table></div>
+  <p class="note">In left-hand traffic the turn mirrors: oncoming cars then cross your path, which is the same problem as route 10's left turn. The design covers both, because that case is just a Cross conflict with the oncoming lane.</p>
+</section>
+
+<section>
+  <h2>What route 8 shows</h2>
+  <div class="scroll"><table>
+    <tr><th>Measured</th><th>Value</th><th>What it means</th></tr>
+    <tr><td>Stream</td><td class="n">13 m/s, 24–26 m apart, about 1.9 s</td><td>Scenario file, confirmed from the log. It holds constant speed and ignores other vehicles until one of them hits something, so it won't brake for you</td></tr>
+    <tr><td>Stream's path</td><td>Into your exit lane, e = 0 after the merge</td><td>It's traffic to join. Classifying it at t = 0 alone is why every plan has a window "to inf"</td></tr>
+    <tr><td>Crosser due within 3 s</td><td class="n">145 of 145 plans at the wait</td><td>Each window gets 1 s added either side, so with cars 1.9 s apart no gap is ever left</td></tr>
+    <tr><td>Oncoming queue, 3.6 m left of the exit lane</td><td>At rest</td><td>Held at their red light. Not a conflict</td></tr>
+    <tr><td>Horizon reach from rest</td><td class="n">6 m at 3 m/s²</td><td>The merge is about 10 m away, 2.6 s at that acceleration, so the plan can't see itself clearing it</td></tr>
+    <tr><td>Our NMPC</td><td class="n">43 %, stood 29 s</td><td>Watchdog at 70 s, no collision</td></tr>
+    <tr><td>Plain SimLingo + PID</td><td class="n">100 %, 11.5 s, no infractions</td><td>Waits at the line, then enters right behind a passing car</td></tr>
+  </table></div>
+  <p class="note">Treat SimLingo's 11.5 s with care: 78.6 m with a stop at the line doesn't add up in that time, and the video ends soon after the merge. How it entered is clear, but the score may be over-counted. I also only ran it twice.</p>
+  <h3>How big a gap the merge needs</h3>
+  <div class="scroll"><table>
+    <tr><th>Acceleration, turn speed</th><th>Follower ends 1 s behind</th><th>0.5 s behind</th><th>3 m behind</th></tr>
+    <tr><td>3 m/s², 6 m/s (today's plan limit)</td><td class="n">3.8 s</td><td class="n">3.3 s</td><td class="n bad">2.8 s</td></tr>
+    <tr><td>5 m/s², 6 m/s</td><td class="n">3.6 s</td><td class="n">3.1 s</td><td class="n">2.6 s</td></tr>
+    <tr><td>5 m/s², 7.5 m/s</td><td class="n">3.1 s</td><td class="n">2.6 s</td><td class="n warn">2.1 s</td></tr>
+  </table></div>
+  <p class="note">Headway needed in a 13 m/s stream, from a simple kinematic model starting 5 m from the merge. The stream offers about 1.9 s, so this model says it's just out of reach, yet SimLingo did it. The check on the distance-time chart below, with no margins and a tighter start, leaves about 1 m at each end. So the gap exists only without courtesy margins, and the model needs tuning against real entries.</p>
+</section>
+
+<section>
+  <h2>The constraints, by phase</h2>
+  <p>The turn has five phases, and each one needs only some constraints. Most of the piling-on today comes from keeping them all on all the time.</p>
+  <div class="scroll"><table class="m">
+    <tr><th>Constraint</th><th>Approach</th><th>Hold</th><th>Go</th><th>Merge</th><th>Exit</th></tr>
+    <tr><td>Corridor, lane and road edges</td><td class="on1">on</td><td class="on1">on</td><td class="on1">turn band</td><td class="on1">turn band</td><td class="on1">on</td></tr>
+    <tr><td>Grip, speed limit, turn speed</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td></tr>
+    <tr><td>Stop line, red light</td><td class="on1">on</td><td class="on1">on</td><td class="pre">off</td><td class="pre">off</td><td class="pre">off</td></tr>
+    <tr><td>Lead in approach lane</td><td class="on1">on</td><td class="on1">on</td><td class="pre">off</td><td class="pre">off</td><td class="pre">off</td></tr>
+    <tr><td>Yield before zone</td><td class="pre">off</td><td class="on1">on</td><td class="pre">off</td><td class="pre">off</td><td class="pre">off</td></tr>
+    <tr><td>Clear a crosser (pass)</td><td class="pre">off</td><td class="pre">off</td><td class="on1">on</td><td class="pre">off</td><td class="pre">off</td></tr>
+    <tr><td>Lead in exit lane</td><td class="pre">off</td><td class="pre">off</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td></tr>
+    <tr><td>Follower behind you (new)</td><td class="pre">off</td><td class="pre">off</td><td class="on1">on</td><td class="on1">on</td><td class="pre">off</td></tr>
+    <tr><td>Pedestrian at zone 3</td><td class="pre">off</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td><td class="pre">off</td></tr>
+    <tr><td>Movers (near but no conflict)</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td><td class="on1">on</td></tr>
+  </table></div>
+  <div class="scroll"><table>
+    <tr><th>Constraint</th><th>Form</th><th>Add when</th><th>Remove when</th><th>Tier</th></tr>
+    <tr><td class="w">Corridor</td><td class="n">lo(s) ≤ e ± body ≤ hi(s)</td><td>Always. Wider band through the turn</td><td>Never</td><td>2</td></tr>
+    <tr><td class="w">Swept body in the turn</td><td class="n">front and rear corners in band</td><td>Curvature above a limit. The rear cuts in towards the kerb, the front swings out</td><td>Back on straight</td><td>2</td></tr>
+    <tr><td class="w">Turn speed</td><td class="n">v ≤ √(a_lat / κ)</td><td>Always</td><td>Never</td><td>4, cost</td></tr>
+    <tr><td class="w">Stop line</td><td class="n">front ≤ s_line</td><td>Red, or stop sign not yet held</td><td>Green and order decided, or held</td><td>2</td></tr>
+    <tr><td class="w">Yield before zone</td><td class="n">front(t) ≤ s_in − m over [t_in, t_out]</td><td>Actor arrives inside the window and goes first</td><td>Rear of actor past s_out, held 0.3 s</td><td>1</td></tr>
+    <tr><td class="w">Clear ahead (pass)</td><td class="n">rear(t) ≥ s_out + m at t_in</td><td>Order says ego first, and the time-to-clear check passes</td><td>Rear past the zone</td><td>1</td></tr>
+    <tr><td class="w">Exit lead</td><td class="n">front(t) ≤ lead_rear(t) − g</td><td>From the time you enter its lane, not before</td><td>It leaves your lane</td><td>1</td></tr>
+    <tr><td class="w">Follower (new)</td><td class="n">rear(t) ≥ follower_front(t) + g</td><td>You've chosen a slot ahead of it</td><td>Your speed matches its speed</td><td>1 at contact, 3 for spacing</td></tr>
+    <tr><td class="w">Exit space</td><td class="n">check, not a row: queue tail ≥ s_exit + body</td><td>Before Go</td><td>After Go</td><td>Decision</td></tr>
+    <tr><td class="w">Stoppable at horizon end</td><td class="n">front(T) + v²/2a ≤ cap(T)</td><td>Any upper limit in the horizon</td><td>In Go, past the point of no return</td><td>1</td></tr>
+  </table></div>
+  <p class="note">Tiers: 1 contact, 2 law and road, 3 spacing, 4 comfort. When nothing is feasible, the lowest priority gives way first. Today every group except headway shares one slack weight, so a lane edge costs as much as a collision.</p>
+</section>
+
+<section>
+  <h2>The dynamic system</h2>
+  <p>Actors never go to the NMPC directly. Each plan runs these steps, and only the last one touches the solver.</p>
+  <pre>tracks + predictions
+   1 ConflictMap    each actor against the path over the whole prediction:
+                    Cross / Merge / Follow / None, zone [s_in, s_out], window, priority
+   2 Registry       one record per (actor, zone), kept between plans, with a lifecycle
+   3 Phase          Approach / Hold / Go / Merge / Exit, decides which kinds may be active
+   4 Tube search    orders the conflicts over 8 s, gives cap(t), floor(t), v_ref(t)
+   5 Compiler       writes the tube and movers into the fixed parameter slots
+   6 NMPC           solves, returns slack per group
+   7 Feedback       slack and failures go back to the registry</pre>
+  <h3>The tube is what stops the piling-on</h3>
+  <p>Every longitudinal constraint is a limit on where you can be at a given time. Once you've picked your place in the order, only the nearest car ahead and the nearest behind matter. Ten cars become one band, and the NMPC already has one <code>cap</code> and one <code>floor</code> per step.</p>
+  <div class="scroll"><svg viewBox="0 0 760 340" role="img" aria-label="Distance along the path against time. Stream cars are diagonal bands after the merge point. The ego tube runs between two of them.">
+<line x1="56" x2="740" y1="269.2" y2="269.2" class="grid"/><text x="48" y="273.2" class="tick" text-anchor="end">0</text>
+<line x1="56" x2="740" y1="227.7" y2="227.7" class="grid"/><text x="48" y="231.7" class="tick" text-anchor="end">10</text>
+<line x1="56" x2="740" y1="186.2" y2="186.2" class="grid"/><text x="48" y="190.2" class="tick" text-anchor="end">20</text>
+<line x1="56" x2="740" y1="144.6" y2="144.6" class="grid"/><text x="48" y="148.6" class="tick" text-anchor="end">30</text>
+<line x1="56" x2="740" y1="103.1" y2="103.1" class="grid"/><text x="48" y="107.1" class="tick" text-anchor="end">40</text>
+<line x1="56" x2="740" y1="61.5" y2="61.5" class="grid"/><text x="48" y="65.5" class="tick" text-anchor="end">50</text>
+<line x1="56" x2="740" y1="20.0" y2="20.0" class="grid"/><text x="48" y="24.0" class="tick" text-anchor="end">60</text>
+<line y1="20" y2="290" x1="56.0" x2="56.0" class="grid"/><text y="308" x="56.0" class="tick" text-anchor="middle">0</text>
+<line y1="20" y2="290" x1="141.5" x2="141.5" class="grid"/><text y="308" x="141.5" class="tick" text-anchor="middle">1</text>
+<line y1="20" y2="290" x1="227.0" x2="227.0" class="grid"/><text y="308" x="227.0" class="tick" text-anchor="middle">2</text>
+<line y1="20" y2="290" x1="312.5" x2="312.5" class="grid"/><text y="308" x="312.5" class="tick" text-anchor="middle">3</text>
+<line y1="20" y2="290" x1="398.0" x2="398.0" class="grid"/><text y="308" x="398.0" class="tick" text-anchor="middle">4</text>
+<line y1="20" y2="290" x1="483.5" x2="483.5" class="grid"/><text y="308" x="483.5" class="tick" text-anchor="middle">5</text>
+<line y1="20" y2="290" x1="569.0" x2="569.0" class="grid"/><text y="308" x="569.0" class="tick" text-anchor="middle">6</text>
+<line y1="20" y2="290" x1="654.5" x2="654.5" class="grid"/><text y="308" x="654.5" class="tick" text-anchor="middle">7</text>
+<line y1="20" y2="290" x1="740.0" x2="740.0" class="grid"/><text y="308" x="740.0" class="tick" text-anchor="middle">8</text>
+<rect x="56.0" y="20" width="171.0" height="270" class="hz"/><text x="141.5" y="34" class="lab" text-anchor="middle">NMPC horizon today, 2 s</text>
+<line x1="56" x2="740" y1="227.7" y2="227.7" class="cz"/><text x="736" y="242.7" class="lab" text-anchor="end">merge point, 10 m ahead</text>
+<polygon points="56.0,-54.1 -61.4,20.0 -61.4,39.1 56.0,-35.0" class="car"/>
+<polygon points="56.0,49.7 103.0,20.0 103.0,39.1 56.0,68.8" class="car"/>
+<polygon points="56.0,153.5 267.4,20.0 267.4,39.1 56.0,172.7" class="car"/>
+<polygon points="103.0,227.7 431.9,20.0 431.9,39.1 103.0,246.8" class="car"/>
+<polygon points="267.4,227.7 596.3,20.0 596.3,39.1 267.4,246.8" class="car"/>
+<polygon points="431.9,227.7 740.0,33.1 740.0,52.2 431.9,246.8" class="car"/>
+<polygon points="596.3,227.7 740.0,136.9 740.0,156.0 596.3,246.8" class="car"/>
+<polyline points="160.3,269.2 168.9,269.1 177.4,268.7 186.0,268.1 194.5,267.3 203.1,266.3 211.6,265.1 220.2,263.7 228.7,262.1 237.3,260.3 245.8,258.2 254.4,256.0 262.9,253.5 271.5,250.9 280.0,248.0 288.6,244.9 297.1,241.8 305.7,238.7 314.2,235.6 322.8,232.5 331.3,229.4 339.9,226.2 348.4,223.1 357.0,220.0 365.5,216.9 374.1,213.8 382.6,210.7 391.2,207.5 399.7,204.4 408.3,201.3 416.8,198.2 425.4,195.1 433.9,191.9 442.5,188.5 451.0,184.9 459.6,181.0 468.1,177.0 476.7,172.8 485.2,168.3 493.8,163.7 502.3,158.8 510.9,153.8 519.4,148.5 528.0,143.1 536.5,137.7 545.1,132.3 553.6,126.9 562.2,121.5 570.7,116.1 579.3,110.7 587.8,105.3 596.4,99.9 604.9,94.5 613.5,89.1 622.0,83.7 630.6,78.3 639.1,72.9 647.7,67.5 656.2,62.1 664.8,56.7 673.3,51.3 681.9,45.9 690.4,40.5 699.0,35.1 707.5,29.7 716.1,24.3" class="ego"/>
+<polyline points="56.0,269.2 158.6,269.2" class="ego"/>
+<text x="359.5" y="185.5" class="lab2">ego goes here</text>
+<text x="398.0" y="328" class="tick" text-anchor="middle">time from now [s]</text>
+<text x="14" y="155.0" class="tick" text-anchor="middle" transform="rotate(-90 14 155.0)">distance along path [m]</text></svg></div>
+  <p class="note">To scale: red bands are stream cars at 13 m/s, 25 m apart. The line is the ego leaving at 1.2 s, at 5 m/s² and 7.5 m/s through the turn. It clears the car ahead by 1.3 m and the one behind by 0.9 m, so this slot only works with no courtesy margin. Most of the decision lies outside the shaded 2 s horizon.</p>
+  <p>The search is a small grid over time and distance, 8 s ahead, which should take well under a millisecond per pass. It gives at most two tubes to solve: go now, or wait. That replaces one <code>pass:id</code> candidate per actor, and the NMPC horizon can stay at 2 s, since it follows a tube planned over 8 s.</p>
+
+  <h3>Each constraint's lifecycle</h3>
+  <div class="scroll"><table>
+    <tr><th>State</th><th>Meaning</th><th>Moves on when</th></tr>
+    <tr><td>Observed</td><td>In the ConflictMap, not in the plan</td><td>Inside the 8 s window, for 2 plans in a row, so one bad prediction can't brake the car</td></tr>
+    <tr><td>Armed</td><td>In the tube search, not yet in the NMPC</td><td>It reaches the horizon</td></tr>
+    <tr><td>Active</td><td>In a slot</td><td>Its release condition holds</td></tr>
+    <tr><td>Releasing</td><td>Limit eases over 3–5 plans</td><td>Fully eased, or the conflict returns</td></tr>
+    <tr><td>Retired</td><td>Kept briefly so a track that flickers doesn't re-add it</td><td>2 s pass, then forgotten</td></tr>
+  </table></div>
+
+  <h3>Rules that keep switching safe</h3>
+  <ol>
+    <li><strong>No rows are added at run time.</strong> The solver's structure is fixed, and rebuilding takes over a minute. The 34 rows per step (850 across 25 steps) already exist. A row turned off is the constant −1, so the bank costs little, and solve time stays near today's 29 ms median and 38 ms at the 95th percentile on route 8.</li>
+    <li><strong>Never activate what can't be met.</strong> Before a limit goes in, check it against braking: if <code>front + v²/2a_min</code> is past it, that order isn't available, and the search picks another. A limit that appears inside the stopping distance is what causes hard brakes and failed solves.</li>
+    <li><strong>Tighten over time.</strong> A new limit moves in from where the warm start already is, over a few plans, so the solver isn't shocked.</li>
+    <li><strong>Lock the order past the point of no return.</strong> Once you can't stop before the zone at comfortable braking, the yield can't be re-added. The Go decision only reverses on a real collision threat.</li>
+    <li><strong>Check the final plan separately.</strong> Test the chosen plan against all actors, including those not in slots. A failure means brake at the limit. That covers the 13 of 153 failed plans the agent drives today.</li>
+    <li><strong>Separate contact from courtesy.</strong> Decide on contact limits first, then add spacing as a soft term. Today's 1 s buffer around every window is courtesy treated as a hard limit, and that's what closes the stream.</li>
+    <li><strong>Let SimLingo propose, and verify it.</strong> When SimLingo's speeds say go, test that tube against contact limits, and accept it if it passes. That's the signal we discard now in keep-lane mode unless it asks to stop.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>What changes in the code</h2>
+  <pre>struct Conflict {  // behaviour.hpp: replaces Lead/Crosser/Blocker classification
+    int actor;  enum { Cross, Merge, Follow, None } kind;
+    double s_in, s_out, t_in, t_out;  bool has_priority;
+  };
+struct Constraint {  // kept between plans, keyed by (actor, zone)
+    Conflict c;  enum { Observed, Armed, Active, Releasing, Retired } state;
+    int tier;  double since;
+  };
+struct Tube { std::vector&lt;double&gt; cap, floor, v_ref; std::string label; };  // one value per step</pre>
+  <div class="scroll"><table>
+    <tr><th>Where</th><th>Change</th><th>Rebuilds the solver?</th></tr>
+    <tr><td><code>behaviour.cpp</code></td><td>Classify over the whole prediction. Actors behind become None</td><td>No</td></tr>
+    <tr><td><code>Gate</code></td><td>Let <code>s</code> vary with time, so a gate can follow a moving car. <code>floor_s</code> is already per step</td><td>No</td></tr>
+    <tr><td><code>urban_nmpc.cpp</code></td><td>Per-step <code>mov_on</code>, one slack weight per tier, and a switch for the stoppable-at-end row</td><td>Once</td></tr>
+    <tr><td>New <code>conflict.cpp</code>, <code>tube.cpp</code></td><td>ConflictMap, registry, phase, tube search, compiler</td><td>No</td></tr>
+    <tr><td><code>Scene</code></td><td>Add the junction's exit lane and zones from the map, and which movement has green</td><td>No</td></tr>
+    <tr><td><code>a_max</code>, <code>gate_buffer</code></td><td>Review: 3 m/s² and a 1 s buffer rule out the only gap route 8 offers</td><td>No</td></tr>
+  </table></div>
+  <h3>Order of work</h3>
+  <ol>
+    <li><strong>Fix classification.</strong> Treat stream cars as merges and cars behind as None. Small, and should remove route 0's false brakes. Test: routes 0 and 8.</li>
+    <li><strong>Run the ConflictMap in shadow mode.</strong> Log it next to today's decisions without acting on it, and compare over routes 0, 1, 8 and 10.</li>
+    <li><strong>Add the tube search and compiler,</strong> replacing the <code>pass:</code> candidates, with the one solver rebuild.</li>
+    <li><strong>Add the phases, the order lock and the final plan check.</strong></li>
+    <li><strong>Add offline tests</strong> beside <code>parked_car_overtake</code>: stream at 1.9 s and 4 s, oncoming left-turner, pedestrian at the exit, queue in the exit, and the left-hand mirror. Then run routes 0–21.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Risks and open questions</h2>
+  <ol>
+    <li><strong>A slot with about 1 m each side is close to a collision.</strong> The stream won't brake for you, and any contact stops it being constant speed for the rest of the run. Whether to accept that gap is a safety decision, and it needs a limit you're comfortable with.</li>
+    <li><strong>Waiting has no end today.</strong> In a stream with no other gap, some rule must decide when to accept more risk or give up. The 70 s watchdog also ends the route long before a very patient car would get through.</li>
+    <li><strong>A bad prediction can poison the tube.</strong> Three routes show predicted jumps of 3.7–5.6 km in 5 s. Fix those first, or a single bad track could close the tube.</li>
+    <li><strong>The 8 s search assumes actors keep their predicted motion.</strong> Replanning at 5 Hz corrects this, but the order lock limits how much it can.</li>
+    <li><strong>The tube search time is an estimate.</strong> I haven't built it, so neither that figure nor the claim that solve time holds has been measured.</li>
+  </ol>
+</section>
+</div>

@@ -1,0 +1,139 @@
+<title>Lane Keeping and Traffic Report</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track run sheet. Results first, then what each finding means, then the open decision. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 880px; margin: 0 auto; display: grid; gap: 34px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 24px; }
+h3 { font-size: 19px; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+header { display: grid; gap: 8px; }
+section { display: grid; gap: 12px; min-width: 0; }
+.finding { display: grid; gap: 4px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+.note { color: var(--muted); font-size: 14px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n { white-space: nowrap; }
+code { font: 400 14px var(--mono); }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+.decision { background: var(--panel); border: 1px solid var(--line); padding: 16px; display: grid; gap: 8px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Lane keeping and traffic: what the runs taught</h1>
+    <div class="meta">simlingo_nmpc --no-cot --fast · Town12 · 31 Oct – 1 Nov 2026 · branch lane-band-worker-timing</div>
+  </header>
+
+  <section>
+    <h2>Where things stand</h2>
+    <p>The car now holds the lane's centre and only takes stops from SimLingo, unless SimLingo's line leaves the lane by more than 1 m. Route 0 finished all 15 runs, and the weave is largely gone. Routes 1, 8 and 10 still don't finish, with no collisions: the car waits in steady traffic until the 70 s watchdog ends the route. Getting through that traffic is the next job, and a design for it is ready but not built.</p>
+    <div class="scroll"><table>
+      <tr><th>Route</th><th>Old path</th><th>Lane keeping</th><th>How it ended</th></tr>
+      <tr><td>0 ParkingCutIn</td><td class="n">100 %</td><td class="n good">100 %</td><td>Finished, 15 of 15 runs</td></tr>
+      <tr><td>1 ParkedObstacle</td><td class="n">18.2 %</td><td class="n warn">30.3 %</td><td>Waits beside the parked car</td></tr>
+      <tr><td>8 Junction, right turn</td><td class="n">10.3 %</td><td class="n warn">43.3 %</td><td>Waits at a green light</td></tr>
+      <tr><td>10 Junction, left turn</td><td class="n">35.5 %</td><td class="n warn">35.5 %</td><td>Waits past the stop sign</td></tr>
+    </table></div>
+    <p class="note">Routes 1, 8 and 10 are one run each. Route 0 was 100, 91, 19.6 and 100 % on the old path, so the 100 % in the table is one good run of those.</p>
+    <div class="scroll"><table>
+      <tr><th>Route 0, while moving</th><th>Old path</th><th>Lane keeping</th></tr>
+      <tr><td>Commanded steering (RMS)</td><td class="n bad">0.060 rad</td><td class="n good">0.019–0.023 rad</td></tr>
+      <tr><td>Heading swing (RMS)</td><td class="n bad">1.49°</td><td class="n good">0.51–0.63°</td></tr>
+      <tr><td>Heading swing (largest)</td><td class="n bad">6.2°</td><td class="n good">about 2°</td></tr>
+      <tr><td>Lateral acceleration (95th percentile)</td><td class="n bad">1.36 m/s²</td><td class="n good">0.29–0.44 m/s²</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>What we learned</h2>
+    <div class="finding">
+      <h3>The wobble came from the path, not from SimLingo</h3>
+      <p>SimLingo's line is steady in the world: each new prediction lands 6–8 cm from the last. The old path was forced through the car, so a few centimetres off the line became a sharp bend just ahead of the bumper. Following the lane's centre removes that bend in normal driving. The same kink is still there while following SimLingo through a turn or lane change.</p>
+    </div>
+    <div class="finding">
+      <h3>Lane change or turn can be read from SimLingo against the map</h3>
+      <p>The check compares SimLingo's line, from 8 m ahead, with the map lane. Over 1 m off starts following SimLingo, and under 0.5 m ends it. The largest offset in lane keeping was 0.57 m and real manoeuvres showed 2.6–2.7 m, so the thresholds have room. Measuring against the lane means a bend in the road doesn't count as a manoeuvre.</p>
+    </div>
+    <div class="finding">
+      <h3>Lane lookups need a height</h3>
+      <p>Town12's roads are 298–380 m up. Asking the map at height 0 gave the wrong lane on 19 % of road points off junctions, against 4 % at road height. On route 8 that put the car's lane band on the oncoming lane. Fixing it took the route from 10 % to 43 %.</p>
+    </div>
+    <div class="finding">
+      <h3>Repeat runs are mostly the same run</h3>
+      <p>Thirteen runs after the height fix, on seeds 1–6, gave only 3 different drives: ten of 30.55 s, two of 28.05 s and one of 27.65 s. They match up to 12 s, and the seed made no difference. A pass count from repeats therefore says little, and what picks the drive isn't known.</p>
+    </div>
+    <div class="finding">
+      <h3>The behaviour layer is what holds the car in traffic</h3>
+      <p>SimLingo asks to stop on only 17–28 % of plans on these routes. Routes 8 and 10 have a stream of cars about 2 s apart, and each crossing car's window is widened by 1 s on both sides, so no gap is ever left. On route 8, 145 of 145 plans also had a window that never ends. That traffic runs down the exit lane, so it's traffic to merge with, but it gets classified as crossing traffic because the direction is only read at t = 0.</p>
+    </div>
+    <div class="finding">
+      <h3>The gaps on route 8 are tight but usable</h3>
+      <p>The stream runs at 13 m/s with about 1.9 s between cars. By the gap model, merging needs 2.8 s at 3 m/s² and 2.1 s at 5 m/s², so it doesn't fit comfortably, and a to-scale profile clears by 1.3 m ahead and 0.9 m behind. Plain SimLingo did enter this stream, reaching 100 % with no infractions in both runs. Those runs covered 78.6 m in 11.5 s, which looks over-counted.</p>
+    </div>
+    <div class="finding">
+      <h3>Route 0 has false stops</h3>
+      <p>Hard stops at 7.1 s and 26.4 s come with cut-in notes reading <code>s 0.0 m</code>, while the real cut-in events are near 12 s and 18.5 s. A car more than 15 m behind seems to project off the lane and read as a cut-in. No test has confirmed this yet.</p>
+    </div>
+    <div class="finding">
+      <h3>A log field was misread</h3>
+      <p>The last field of each actor in <code>nmpc.jsonl</code> is metres predicted over 5 s, not a speed. Read as km/h it misled the analysis for a while. A value of 65 means 13 m/s.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The design for traffic</h2>
+    <p>The NMPC has fixed rows, switched by parameters, and rebuilding the solver takes over a minute. So constraints shouldn't be added to the solver at run time. The design keeps the solver fixed and changes what feeds it: each actor becomes a conflict (cross, merge, follow or none), each conflict moves through a lifecycle, and one space-time plan per cycle is compiled into the fixed slots. Nothing here is implemented.</p>
+    <div class="decision">
+      <h3>Decision needed before the merge is built</h3>
+      <p>Route 8's slot leaves about 1 m at each end, and the stream won't brake for the car. The minimum margin and how long to wait before accepting a smaller one are safety calls for you to make. The first step doesn't depend on them: fix the classification so stream cars are merges and cars behind are ignored, then test on routes 0 and 8.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Still open</h2>
+    <div class="scroll"><table>
+      <tr><th>Issue</th><th>State</th></tr>
+      <tr><td>Route 8 hang at 38.75 s</td><td>Happened once on the old lookup, cause unknown</td></tr>
+      <tr><td>Kink while following SimLingo</td><td>Not fixed, turns can still weave</td></tr>
+      <tr><td>−7 m/s² brake on route 0</td><td>Still there, linked to the false cut-ins</td></tr>
+      <tr><td>Predictions of 3.7–5.6 km in 5 s</td><td>Bad predictions, not explained</td></tr>
+      <tr><td>MinSpeedTest on route 0</td><td>Fails, not understood</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Reports and videos</h2>
+    <div class="scroll"><table>
+      <tr><th>Page</th><th>What it holds</th></tr>
+      <tr><td><a href="https://claude.ai/artifact/2rxv8KEN2YFgercQNGFiVx">Lane Keeping Results</a></td><td>Results with route 0 and 8 videos</td></tr>
+      <tr><td><a href="https://claude.ai/artifact/TZWK8n2943A3vEPj3HbiMf">Driving Behaviours</a></td><td>Six videos of the different behaviours</td></tr>
+      <tr><td><a href="https://claude.ai/artifact/5mgXZSJodoQ7Sk3Cf27chh">Right Turn Constraints</a></td><td>The full design for traffic</td></tr>
+      <tr><td><a href="https://claude.ai/artifact/UwjyFoZyNxnzgxAGiZfaHu">Route 0 Wobble</a></td><td>Why the old path weaved</td></tr>
+      <tr><td><a href="https://claude.ai/artifact/SBSHPBY6heMSNFJ6YypYzX">Route 0 Stall</a></td><td>The 19.6 % run on the old path</td></tr>
+    </table></div>
+    <p class="note">The code, the running notes and copies of these pages are in <code>docs/reports/2026-11-01-lane-keeping-and-traffic/</code> on <a href="https://github.com/Jharsh01/carla-nmpc-expert/tree/lane-band-worker-timing/docs/reports/2026-11-01-lane-keeping-and-traffic">lane-band-worker-timing</a>.</p>
+  </section>
+</div>

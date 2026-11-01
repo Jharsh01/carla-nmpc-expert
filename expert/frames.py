@@ -65,14 +65,15 @@ class Frame:
     """The car's own frame (its origin, x forward, y left), placed in the library's world frame: for turning what is
     known in the world (the world model's ground truth) into what a sensor on the car would report, and back."""
 
-    def __init__(self, x, y, psi):
-        self.x, self.y, self.psi = x, y, psi
+    def __init__(self, x, y, psi, z=0.0):
+        self.x, self.y, self.psi, self.z = x, y, psi, z  # z: its height, for finding its road on the map
         self.c, self.s = math.cos(psi), math.sin(psi)
 
     @classmethod
     def of(cls, transform):
         """The frame of an actor with this CARLA transform, at its origin."""
-        return cls(*from_carla_xy(transform.location.x, transform.location.y), from_carla_yaw(transform.rotation.yaw))
+        return cls(*from_carla_xy(transform.location.x, transform.location.y), from_carla_yaw(transform.rotation.yaw),
+                   transform.location.z)
 
     def to_car(self, x, y):
         dx, dy = x - self.x, y - self.y

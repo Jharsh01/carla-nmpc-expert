@@ -1,0 +1,109 @@
+<title>Driving Behaviours</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track replay sheet. The video is the page; the wobble analysis sits under it as a log. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --sl: #1f8a3a; --plan: #b5179e; --ref: #6a7570;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+header { display: grid; gap: 8px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+video { display: block; width: 100%; max-width: 100%; aspect-ratio: 1920 / 604; background: #000; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 400 13px/1.4 var(--mono); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 7px; vertical-align: middle; background: var(--c); }
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chapters button { font: 500 13px/1.3 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 11px; cursor: pointer; text-align: left; }
+.chapters button:hover { border-color: var(--accent); }
+.chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chapters b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n { white-space: nowrap; }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 72ch; }
+code { font: 400 14px var(--mono); }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+.note { color: var(--muted); font-size: 14px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Driving behaviours, in video</h1>
+    <div class="meta">simlingo_nmpc --no-cot --fast · 31 Oct 2026 · lane-band-worker-timing</div>
+  </header>
+  <div class="legend">
+    <span style="--c: var(--sl)">SimLingo's path</span>
+    <span style="--c: var(--ref)">path the NMPC got</span>
+    <span style="--c: var(--plan)">NMPC plan (red when the solve failed)</span>
+  </div>
+  <p class="note">The bottom bar shows <code>keep lane</code> or <code>FOLLOW SimLingo</code>. Go by the time in the bar, because the videos run up to 15 % fast. The buttons use bar times.</p>
+  <h2>Route 0: the different drives</h2>
+  <p>All of these finished at 100 %. The two lane-keeping drives match until about 12 s, then split on how hard the car brakes for the cut-in car. A third drive, 27.65 s on seed 2, appeared once and wasn't reproduced with video on, so there's no video of it.</p>
+  <section>
+    <h2>The common drive, 30.55 s</h2>
+    <p>This is the one most runs give: 8 of the 10 confirmation runs, and both video re-runs. The extra hard stop comes at 26.4 s, and the logged cut-in note for it reads <code>s 0.0 m</code>, like the suspected false cut-ins.</p>
+    <video id="a" controls playsinline preload="metadata"><source src="drive_a.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="a" data-t="6.4"><b>7.1 s</b>first hard stop</button><button data-v="a" data-t="10.4"><b>12 s</b>the drives split here</button><button data-v="a" data-t="16.1"><b>18.6 s</b>stop near the cut-in car</button><button data-v="a" data-t="23.2"><b>26.4 s</b>late hard stop</button></div>
+  </section>
+  <section>
+    <h2>The shorter drive, 28.05 s</h2>
+    <p>It came up in 1 of the 10 confirmation runs, and in the earlier run this video is from. It slows at 12 s and 18.4 s, and only brakes at 23 s, without the stop at 26.4 s.</p>
+    <video id="b" controls playsinline preload="metadata"><source src="drive_b.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="b" data-t="6.5"><b>7.1 s</b>first hard stop</button><button data-v="b" data-t="10.5"><b>12 s</b>the drives split here</button><button data-v="b" data-t="16.3"><b>18.4 s</b>stop near the cut-in car</button><button data-v="b" data-t="20.8"><b>23 s</b>brake, no full stop</button></div>
+  </section>
+  <section>
+    <h2>Before lane keeping: the wobble</h2>
+    <p>The same route on the old path, for comparison. Watch the car weave around the green line.</p>
+    <video id="o" controls playsinline preload="metadata"><source src="old_path.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="o" data-t="5.1"><b>6 s</b>weave past parked cars</button><button data-v="o" data-t="20.5"><b>24 s</b>strongest weave</button></div>
+  </section>
+  <h2>Other behaviours</h2>
+  <section>
+    <h2>Lane change requested: route 1 (30 %)</h2>
+    <p>SimLingo swings left round a parked car, so the car switches to following it at 6.5 s, with 2.6 m of offset. It then stands waiting for a gap in the traffic alongside and doesn't finish the route.</p>
+    <video id="l" controls playsinline preload="metadata"><source src="lane_change.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="l" data-t="6.2"><b>6.5 s</b>lane change spotted</button><button data-v="l" data-t="29.5"><b>30 s</b>waiting for a gap</button><button data-v="l" data-t="59.0"><b>60 s</b>beside the parked car</button></div>
+  </section>
+  <section>
+    <h2>Turn: route 8 (43 %)</h2>
+    <p>Lane keeping on the straight road, following SimLingo through the turn from 7.5 s to 33.5 s, then back to the lane. It then stands at a green light while the stream it has to merge into passes.</p>
+    <video id="t" controls playsinline preload="metadata"><source src="turn.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="t" data-t="6.5"><b>7.5 s</b>hand over to SimLingo</button><button data-v="t" data-t="29.9"><b>33.5 s</b>back to lane keeping</button><button data-v="t" data-t="54.7"><b>61 s</b>waiting at the green light</button></div>
+  </section>
+  <section>
+    <h2>Left turn with no hand-over: route 10 (35 %)</h2>
+    <p>The map lane already follows this turn, so the car stays in lane keeping. SimLingo's stops show as <code>stop asked</code> in the bar. It stands past the stop sign, waiting for traffic, until the 70 s limit.</p>
+    <video id="j" controls playsinline preload="metadata"><source src="junction.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment"><button data-v="j" data-t="8.4"><b>8.5 s</b>first stop asked</button><button data-v="j" data-t="29.5"><b>30 s</b>waiting at the junction</button></div>
+  </section>
+</div>
+<script>
+  document.querySelectorAll('.chapters button').forEach(b => b.addEventListener('click', () => {
+    const v = document.getElementById(b.dataset.v);
+    v.currentTime = parseFloat(b.dataset.t);
+    v.play().catch(() => {});
+  }));
+</script>

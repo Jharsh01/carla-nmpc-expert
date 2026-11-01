@@ -18,6 +18,8 @@
 //    (not tapered to the stops: waiting is not free), comfort, time out of the ego lane and constraint violation,
 //    with a penalty for going before a crosser rather than after.
 //
+// Before a step, PathIntent says whether the line asked for is a manoeuvre, which decides the route planned along.
+//
 // Traffic-rule state lives here too: a stop sign is released once the car has stood at it for `stop_hold`, and a
 // light turning red when the car could only stop at more than `dilemma_decel` is driven through.
 #pragma once
@@ -49,6 +51,9 @@ struct LaneSection {
     double left_width = 0.0;  // drivable width beyond hi: the lane to the left [m], 0 if none
     bool left_oncoming = true;  // that lane runs the other way
     bool left_allowed = false;  // it may be driven into, to go round a blocker
+    // The road's edges: the outer edges of its outermost driving lanes either side (beyond them a shoulder, a kerb,
+    // a sidewalk). The corridor never goes past them, not when it is widened to where the car is, nor round a blocker.
+    double road_lo = -INF, road_hi = INF;  // [m]
 };
 
 struct StopLine {
@@ -83,6 +88,24 @@ struct Decision {
     std::vector<Candidate> candidates;
     double wall_time = 0.0;  // for the whole step [s]
     std::vector<std::string> notes;  // classification and rule events, for the log
+};
+
+// Whether a line asked for (SimLingo's path) is a manoeuvre: a lane change or a turn. Given as offsets from the lane
+// the car is in, not from its heading, so a bend in the road is not one, nor is the car being a little off the lane
+// (a line starts at the car, and rejoins the lane within `from`). With hysteresis, as the line is a little different
+// each time. Decided before the step, as the route to plan along depends on it (Behaviour::set_route).
+class PathIntent {
+public:
+    double from = 8.0;  // only the line this far ahead of the car counts [m]
+    double enter = 1.0;  // off the lane's centre by more than this, a manoeuvre begins [m]
+    double exit = 0.5;  // and ends when within this [m]
+
+    // The line's points, as s ahead of the car and offset from the lane's centre [m]: whether it is a manoeuvre.
+    bool update(const std::vector<double>& s, const std::vector<double>& e);
+    void reset() { manoeuvre = false; offset = 0.0; }
+
+    bool manoeuvre = false;
+    double offset = 0.0;  // the largest offset at the last update [m]
 };
 
 class Behaviour {

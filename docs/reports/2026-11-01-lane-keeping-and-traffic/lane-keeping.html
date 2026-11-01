@@ -1,0 +1,131 @@
+<title>Lane Keeping Results</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a test-track replay sheet. The video is the page; the wobble analysis sits under it as a log. */
+:root {
+  --bg: #f1f3f2; --panel: #e4e8e6; --fg: #17201d; --muted: #55625d; --line: #c6cecb;
+  --accent: #0b6e6e; --bad: #b3261e; --good: #1f7a45; --warn: #96640a;
+  --sl: #1f8a3a; --plan: #b5179e; --ref: #6a7570;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1b2220; --fg: #e6ecea; --muted: #9aa8a3; --line: #2e3835;
+  --accent: #5cc4c0; --bad: #f28b82; --good: #6fcf97; --warn: #e3b35a;
+  --sl: #5ae678; --plan: #ff5ae6; --ref: #d7d7d7; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--body); }
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 42px); }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+header { display: grid; gap: 8px; }
+.meta { font: 400 13px/1.5 var(--mono); color: var(--muted); }
+video { display: block; width: 100%; max-width: 100%; aspect-ratio: 1920 / 604; background: #000; }
+.vid { display: grid; gap: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 400 13px/1.4 var(--mono); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 7px; vertical-align: middle; background: var(--c); }
+.chapters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chapters button { font: 500 13px/1.3 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  padding: 7px 11px; cursor: pointer; text-align: left; }
+.chapters button:hover { border-color: var(--accent); }
+.chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chapters b { color: var(--accent); font-weight: 500; margin-right: 6px; }
+section { display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n { white-space: nowrap; }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 72ch; }
+code { font: 400 14px var(--mono); }
+.bad { color: var(--bad); } .good { color: var(--good); } .warn { color: var(--warn); }
+.note { color: var(--muted); font-size: 14px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Lane keeping from SimLingo's waypoints</h1>
+    <div class="meta">simlingo_nmpc --no-cot --fast · 31 Oct 2026 · one run per route, 15 on route 0 · lane-band-worker-timing</div>
+  </header>
+
+  <section>
+    <h2>The result</h2>
+    <p>The car now holds the lane's centre and takes only stops from SimLingo, unless SimLingo's line leaves the lane by more than 1 m. The weave on route 0 is largely gone, and the car hands over to SimLingo correctly. Routes 1, 8 and 10 still don't finish: the car stops in traffic and never moves on, with no collisions.</p>
+    <div class="scroll"><table>
+      <tr><th>Route</th><th>Old path</th><th>Lane keeping</th><th>How it ended</th></tr>
+      <tr><td>0 ParkingCutIn</td><td class="n">100 % <span class="note">(path_overlay run)</span></td><td class="n good">100 %</td><td>Finished, as did all 15 runs with lane keeping</td></tr>
+      <tr><td>1 ParkedObstacle</td><td class="n">18.2 %</td><td class="n warn">30.3 %</td><td>Stands beside the parked car, waiting for a gap</td></tr>
+      <tr><td>8 Junction, right turn</td><td class="n">10.3 %</td><td class="n warn">43.3 %</td><td>Stands at a green light as the turn starts</td></tr>
+      <tr><td>10 Junction, left turn</td><td class="n">35.5 %</td><td class="n warn">35.5 %</td><td>Stands past the stop sign, waiting for traffic</td></tr>
+    </table></div>
+    <p class="note">A single run on these routes is noisy, so read the 18 → 30 % on route 1 as "no worse" and not as a gain. The route 8 gain has a known cause, below.</p>
+  </section>
+
+  <section class="vid">
+    <h2>Route 0: holding the lane</h2>
+    <video controls playsinline preload="metadata"><source src="route0.mp4" type="video/mp4"></video>
+    <div class="scroll"><table>
+      <tr><th>While moving</th><th>Old path</th><th>Lane keeping</th></tr>
+      <tr><td>Commanded steering (RMS)</td><td class="n bad">0.060 rad</td><td class="n good">0.019 rad</td></tr>
+      <tr><td>Heading swing (RMS / largest)</td><td class="n bad">1.49° / 6.2°</td><td class="n good">0.54° / 1.9°</td></tr>
+      <tr><td>Lateral acceleration (95th percentile)</td><td class="n bad">1.36 m/s²</td><td class="n good">0.37 m/s²</td></tr>
+    </table></div>
+    <p class="note">Plans that failed are about the same (13 of 140 against 9 of 145), and the −7 m/s² brake is still there.</p>
+  </section>
+
+  <section class="vid">
+    <h2>Route 8: handing over at a turn</h2>
+    <video id="v8" controls playsinline preload="metadata"><source src="route8.mp4" type="video/mp4"></video>
+    <div class="chapters" aria-label="Jump to a moment">
+      <button data-t="6.7"><b>7.5 s</b>the turn is spotted, 2.7 m off the lane</button>
+      <button data-t="30"><b>33.5 s</b>back to lane keeping</button>
+      <button data-t="55"><b>61 s</b>still waiting at a green light</button>
+    </div>
+    <div class="legend">
+      <span style="--c: var(--sl)">SimLingo's path</span>
+      <span style="--c: var(--ref)">path the NMPC got</span>
+      <span style="--c: var(--plan)">NMPC plan (red when the solve failed)</span>
+    </div>
+    <p>The bottom bar shows <code>keep lane</code> or <code>FOLLOW SimLingo</code>, with the offset in metres. The time in the bar is the true one, as the video runs a little fast.</p>
+  </section>
+
+  <section>
+    <h2>A bug this exposed</h2>
+    <p>On route 8 the first run followed SimLingo from the first tick, on a straight road, 2.75 m off the lane. The lane lookup asked the map for height 0, but Town12's roads are 300–380 m up, so CARLA returned the oncoming lane. The NMPC steered towards that lane and left the road. With the old path, on the same bug, the car stopped after 9 m. The lookup now uses the car's height, which cut wrong lanes off junctions from 19 % to 4 % of Town12's road points.</p>
+  </section>
+
+  <section>
+    <h2>How it decides</h2>
+    <ol>
+      <li><strong>Lane change or turn:</strong> SimLingo's line, from 8 m ahead, is more than 1 m off the map lane. This ends when it is back within 0.5 m. Measuring against the lane, not the car's heading, means a bend in the road doesn't count.</li>
+      <li><strong>"Straight" means the lane's centre,</strong> so the car follows bends in the road.</li>
+      <li><strong>Stopping:</strong> SimLingo's speed counts only if it drops under 1 m/s within 2 s. Otherwise the target is the speed limit, and actors and rules bring it down.</li>
+      <li><strong>The thresholds held up:</strong> the largest offset in lane keeping was 0.57 m across the four routes, and real manoeuvres showed 2.6–2.7 m. Route 10 never hands over, because the map lane already follows its left turn.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Still open</h2>
+    <ol>
+      <li><strong>Waiting for good in traffic.</strong> This is now the main blocker, and it also happens on the old path on routes 1 and 10. On route 8, notes like "crosser in the lane to inf" come from the moving stream running down the exit lane, which gets read as crossing traffic. An earlier version of this page blamed cars at rest in a queue, and that was wrong.</li>
+      <li><strong>The kink remains while following SimLingo.</strong> The path is still forced through the car during turns and lane changes, so the weave can return there.</li>
+      <li><strong>A hang on route 8.</strong> One run stopped ticking at 38.75 s and sat for an hour, on the old lane lookup. The cause is unknown, and it didn't happen again in the one later run.</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+  const v = document.getElementById('v8');
+  document.querySelectorAll('.chapters button').forEach(b => b.addEventListener('click', () => {
+    v.currentTime = parseFloat(b.dataset.t);
+    v.play().catch(() => {});
+  }));
+</script>
