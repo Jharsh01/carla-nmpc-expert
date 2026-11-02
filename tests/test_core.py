@@ -104,3 +104,90 @@ def test_a_car_level_with_the_car_can_still_cut_in():
     decision = behaviour.step(scene)
     assert any("cut-in" in note for note in decision.notes)
     assert decision.plan.x[:, 4].min() < -1.0
+
+
+def test_a_car_that_stays_out_is_left_out_of_the_plan():
+    """Bench2Drive route 1: an oncoming car in its own lane, projected across a slanted path, read as coming down the
+    car's lane, and the car stopped dead. Here a car the same as the cut-in above, but known to stay in its lane."""
+    behaviour, scene = _behaviour_and_scene(7.9)
+    car = _car(5.0, 3.0, 4.0, -1.5)
+    car.stays_out = True
+    scene.actors = [car]
+    decision = behaviour.step(scene)
+    assert not any("cut-in" in note for note in decision.notes)
+    assert decision.plan.x[:, 4].min() > -1.0
+    assert not decision.candidates[0].problem.movers
+
+
+def test_a_car_that_stays_out_counts_once_the_car_would_go_into_its_lane():
+    """Borrowing the left lane round a blocker: the cars in that lane are kept clear of, and oncoming ones hold it back."""
+    behaviour_options = expertctl.BehaviourOptions()
+    route = expertctl.Path.from_waypoints([[x, 0.0] for x in range(-15, 200, 5)], False)
+    params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
+    options = expertctl.UrbanOptions()
+    options.horizon, options.fine, options.h_fine, options.h = 2.0, 1.0, 0.05, 0.2
+    behaviour = expertctl.Behaviour(route, params, expertctl.Body(), options, behaviour_options)
+    lane = expertctl.LaneSection(lo=-1.6, hi=1.6, left_width=3.2, left_oncoming=True, left_allowed=True, road_lo=-1.6,
+                                 road_hi=4.8)
+
+    def scene_with(others):
+        scene = expertctl.Scene()
+        scene.ego = expertctl.Ego(x=0.3, v=5.0)
+        scene.v_max = 8.33
+        scene.lanes = [lane]
+        blocker = _car(25.0, 0.0, 0.0)
+        blocker.id, blocker.parked = 2, True
+        scene.actors = [blocker] + others
+        return scene
+
+    behaviour_scene = scene_with([])
+    assert any(c.label == "borrow_left" for c in behaviour.step(behaviour_scene).candidates)  # free to go round
+
+    oncoming = _car(40.0, 3.2, -8.0)
+    oncoming.id, oncoming.stays_out, oncoming.psi = 3, True, [math.pi] * len(oncoming.t)
+    decision = behaviour.step(scene_with([oncoming]))
+    assert not any(c.label == "borrow_left" for c in decision.candidates)
+    assert any("oncoming traffic" in note for note in decision.notes)
+
+    alongside = _car(10.0, 3.2, 5.0)
+    alongside.id, alongside.stays_out = 3, True
+    decision = behaviour.step(scene_with([alongside]))
+    borrow = next(c for c in decision.candidates if c.label == "borrow_left")
+    base = next(c for c in decision.candidates if c.label == "base")
+    assert len(borrow.problem.movers) > len(base.problem.movers)
+
+
+def test_a_steering_command_keeps_to_the_rate_across_a_jump():
+    from expert.mkz_actuation import rate_limited
+    assert rate_limited(0.5, 0.1, 0.6, 0.05) == pytest.approx(0.13)
+    assert rate_limited(-0.5, 0.1, 0.6, 0.05) == pytest.approx(0.07)
+    assert rate_limited(0.11, 0.1, 0.6, 0.05) == pytest.approx(0.11)
+
+
+class _Plan:
+    def __init__(self, success):
+        self.success = success
+
+
+def test_a_failed_plan_is_not_driven():
+    from expert.plan_hold import PlanHold
+    hold = PlanHold(hold=0.6, brake=-2.0)
+    good = _Plan(True)
+    hold.update(good, 1.0)
+    assert hold.plan is good and hold.a_limit(1.1) == math.inf
+    hold.update(_Plan(False), 1.2)
+    assert hold.plan is good and hold.t == 1.0  # the last good one, from when it was made
+    assert hold.a_limit(1.7) == math.inf  # followed on for a while
+    hold.update(_Plan(False), 1.4)  # still counted from the first failure
+    assert hold.plan is good and hold.a_limit(1.85) == -2.0  # then braking
+    better = _Plan(True)
+    hold.update(better, 2.0)
+    assert hold.plan is better and hold.a_limit(2.0) == math.inf
+
+
+def test_with_no_good_plan_yet_the_failed_one_stands_under_the_brake():
+    from expert.plan_hold import PlanHold
+    hold = PlanHold(hold=0.0, brake=-2.0)
+    first = _Plan(False)
+    hold.update(first, 0.0)
+    assert hold.plan is first and hold.a_limit(0.0) == -2.0

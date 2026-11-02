@@ -7,7 +7,8 @@
 // 1. Every actor's predicted trajectory is taken into the route's path coordinates and classified against the ego
 //    lane: a *lead* (in the lane ahead, going along it), a *blocker* (in the lane ahead and parked: an accident,
 //    construction, a parked car), a *crosser* (entering the lane, or in it going across: pedestrians, junction
-//    traffic, cut-ins) or a *mover* (anything else nearby: kept clear of as circles).
+//    traffic, cut-ins) or a *mover* (anything else nearby: kept clear of as circles). A car that stays out of the
+//    lanes the ego is using (Actor::stays_out) is none of these.
 // 2. Candidates are built from discrete choices: yield to each crosser (a gate keeping the front behind where it
 //    crosses while it does) or pass ahead of it (a gate keeping the rear past it), stay behind a blocker or borrow
 //    the neighbouring lane round it (only with a gap in the oncoming traffic). Stop lines (red lights, stop signs,
@@ -40,6 +41,9 @@ struct Actor {
     Kind kind = vehicle;
     double length = 4.8, width = 2.0;  // [m]
     bool parked = false;  // a vehicle that will not move off: parked, crashed, broken down
+    // A car with no intent to use the lanes the ego is using (on the map: expert/world_model): left out of the plan,
+    // but for what would take the ego into its lane (borrowing the left lane).
+    bool stays_out = false;
     // the centre's predicted trajectory in the world frame, at times t from the scene's time; t[0] = 0 is now
     std::vector<double> t, x, y, psi;
 };

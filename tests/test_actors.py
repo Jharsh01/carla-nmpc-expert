@@ -1,9 +1,11 @@
 """The world model's tracks, on a stand-in for CARLA."""
 import types
 
+import numpy as np
 import pytest
 
-from expert.world_model.actors import Actors
+from expert import frames
+from expert.world_model.actors import Actors, Track
 
 expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 
@@ -70,3 +72,98 @@ def test_an_actor_out_of_sight_is_kept_a_while():
     assert 7 in actors.tracks
     actors.detect(2.0)
     assert 7 not in actors.tracks
+
+
+# ---- intent: a straight road along CARLA's x, lanes of 3.2 m, the ego's at y = 0, a lane the same way on its left
+# (y = -3.2), an oncoming one beyond it (y = -6.4)
+
+class _Wp:
+    is_junction = False
+    lane_width = 3.2
+
+    def __init__(self, index, x, junction=False):
+        self.index, self.x, self.is_junction = index, x, junction
+        self.road_id, self.section_id, self.lane_id = 1, 0, index
+        self.transform = types.SimpleNamespace(location=_Location(x, -3.2 * index),
+                                               rotation=types.SimpleNamespace(yaw=180.0 if index == 2 else 0.0))
+
+    def _beside(self, index):
+        return _Wp(index, self.x) if 0 <= index <= 2 else None
+
+    def get_left_lane(self):
+        return self._beside(self.index - 1 if self.index == 2 else self.index + 1)
+
+    def get_right_lane(self):
+        return self._beside(self.index + 1 if self.index == 2 else self.index - 1)
+
+
+class _IntentMap:
+    def __init__(self, junction=False):
+        self.junction = junction
+
+    def get_waypoint(self, loc, project_to_road=True, lane_type=None):
+        return _Wp(max(0, min(2, round(-loc.y / 3.2))), loc.x, self.junction)
+
+
+def _intent(y, vy=0.0, vx=8.0, width=1.9, yaw=0.0, parked=False, junction=False, ego=((1, 0, 0),), prediction_y=None):
+    """Whether a car at CARLA (20, y), moving (vx, vy) in the library's y (to the left), stays out of the lanes `ego`."""
+    carla = types.SimpleNamespace(Location=_Location, LaneType=types.SimpleNamespace(Driving="Driving"))
+    actors = Actors(expertctl, carla, None, _IntentMap(junction), None, visibility=False)
+    track = Track(1, "vehicle")
+    track.width = width
+    car = _Actor(1, 20.0, y)
+    car.get_transform = lambda: types.SimpleNamespace(location=car.location, rotation=types.SimpleNamespace(yaw=yaw))
+    track.actor = car
+    for t in np.arange(0.0, 0.5, 0.05):  # library frame: y left
+        track.add(t, 20.0 + vx * (t - 0.45), -y + vy * (t - 0.45), 0.0)
+    a = expertctl.Actor()
+    a.parked = parked
+    a.t = [0.25 * i for i in range(21)]
+    a.x = [20.0 + vx * t for t in a.t]
+    a.y = [-y if prediction_y is None else prediction_y for t in a.t]
+    return actors._stays_out(track, a, frames.Frame(0.0, 0.0, 0.0), lambda x, y: set(ego))
+
+
+def test_a_car_going_along_the_next_lane_stays_out():
+    assert _intent(-3.2)
+
+
+def test_an_oncoming_car_in_its_own_lane_stays_out():
+    assert _intent(-6.4, vx=-8.0, yaw=180.0)
+
+
+def test_a_car_in_the_ego_lane_does_not_stay_out():
+    assert not _intent(0.0)
+
+
+def test_a_car_predicted_in_the_ego_lane_does_not_stay_out():
+    assert not _intent(-3.2, prediction_y=0.0)
+
+
+def test_a_car_moving_into_the_ego_lane_does_not_stay_out():
+    assert not _intent(-3.2, vy=-0.8)
+
+
+def test_a_car_moving_away_from_the_ego_lane_stays_out():
+    assert _intent(-3.2, vy=0.8)
+
+
+def test_a_car_reaching_into_the_ego_lane_does_not_stay_out():
+    assert not _intent(-2.1)
+
+
+def test_small_tracker_noise_is_not_a_lane_change():
+    assert _intent(-3.2, vy=-0.1)
+
+
+def test_the_target_lane_of_a_lane_change_counts():
+    assert not _intent(-3.2, ego=((1, 0, 0), (1, 0, 1)))
+
+
+def test_a_car_in_a_junction_or_crossing_is_not_left_out():
+    assert not _intent(-3.2, junction=True)
+    assert not _intent(-3.2, yaw=60.0)
+
+
+def test_a_parked_car_is_left_as_it_is():
+    assert not _intent(-3.2, vx=0.0, parked=True)

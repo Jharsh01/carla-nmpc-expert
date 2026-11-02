@@ -149,7 +149,7 @@ Decision Behaviour::step(const Scene& sc) {
         double s_lo, s_hi;
     };
     std::vector<Blocker> blockers;
-    std::vector<const Track*> blocker_tracks, oncoming;
+    std::vector<const Track*> blocker_tracks, oncoming, stay_out;
 
     auto add_movers = [&](const Track& tr, std::vector<Mover>& into) {
         const Actor& a = *tr.actor;
@@ -177,6 +177,11 @@ Decision Behaviour::step(const Scene& sc) {
         const Actor& a = *tr.actor;
         const size_t n = tr.t.size();
         const bool aligned = tr.cos_rel > 0.5, opposed = tr.cos_rel < -0.5;
+        if (a.stays_out) {  // nothing to the ego, unless it goes into that car's lane
+            stay_out.push_back(&tr);
+            if (opposed) oncoming.push_back(&tr);
+            continue;
+        }
         const bool crossing_kind = a.kind == Actor::walker || (!aligned && !opposed);
         const bool ahead_now = tr.s[0] - tr.ext_s[0] > front0 - 0.5;
         const bool behind_now = tr.s[0] + tr.ext_s[0] < rear0;  // all of it
@@ -378,6 +383,7 @@ Decision Behaviour::step(const Scene& sc) {
                 }
                 for (const Crosser& x : crossers) c.problem.gates.push_back(yield_gate(x));
                 for (const Track* tr : blocker_tracks) add_movers(*tr, c.problem.movers);  // gone round, not stopped behind
+                for (const Track* tr : stay_out) add_movers(*tr, c.problem.movers);  // the lanes it goes into count here
                 if (static_cast<int>(cands.size()) >= opt.pool) cands.pop_back();
                 cands.push_back(std::move(c));
             }
@@ -426,15 +432,15 @@ Decision Behaviour::step(const Scene& sc) {
         if (c.label.rfind("pass:", 0) == 0) J += opt.pass_penalty;
         return J;
     };
-    int best = -1;
-    bool best_ok = false;
+    int best = -1, best_rank = -1;
     for (size_t i = 0; i < cands.size(); ++i) {
         Candidate& c = cands[i];
         // within the hard constraints (the headway, the last group, is spacing, not contact)
         const double slack = *std::max_element(c.plan.slack_max.begin(), c.plan.slack_max.end() - 1);
         const bool ok = slack <= opt.slack_ok;
         c.score = score(c) * (c.label == m.last_label ? opt.hysteresis : 1.0);
-        if (best < 0 || (ok && !best_ok) || (ok == best_ok && c.score < cands[best].score)) best = static_cast<int>(i), best_ok = ok;
+        const int rank = (c.plan.success ? 2 : 0) + (ok ? 1 : 0);  // solved first: a failed plan is not to be driven
+        if (rank > best_rank || (rank == best_rank && c.score < cands[best].score)) best = static_cast<int>(i), best_rank = rank;
     }
     out.label = cands[best].label;
     out.plan = cands[best].plan;

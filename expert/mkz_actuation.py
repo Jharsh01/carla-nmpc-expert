@@ -34,6 +34,12 @@ def _clean(table, speeds, levels, increasing):
     return smoothed
 
 
+def rate_limited(target, last, rate, dt):
+    """`target`, no further from `last` than `rate` allows in dt: each plan keeps to the rate within itself, but a new
+    plan, or the point sampled on it, can start somewhere else."""
+    return last + max(-rate * dt, min(rate * dt, target - last))
+
+
 class MKZActuation:
     def __init__(self, path, dt=0.05, kp=0.15, ki=0.3, i_max=1.5):
         r = json.load(open(path))

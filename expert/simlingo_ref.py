@@ -14,19 +14,25 @@ BEHIND = 15.0  # [m] the path reaches behind the car, so that actors and stops j
 
 
 def path_points(route_ego, min_gap=0.5):
-    """The points of the path through SimLingo's route, in the car's frame (y left): from BEHIND metres behind the
-    car's origin, through the origin, then the route's points, each at least `min_gap` past the last kept (closer
-    ones, and ones going back on the last direction, dropped)."""
-    kept = [np.array([-d, 0.0]) for d in np.arange(BEHIND, 0.0, -2.5)] + [np.zeros(2)]
+    """The points of the path along SimLingo's route, in the car's frame (y left): the route where it is, each point at
+    least `min_gap` past the last kept (closer ones, and ones going back on the last direction, dropped), carried back
+    BEHIND metres along its first few metres. Not through the car: joining the car to a line a little to one side of it
+    makes a bend of well under a metre's radius, and past that bend's radius the NMPC's path coordinates break down
+    (1 - kappa e < 0: docs/learnings.md). The car's offset from the line is the NMPC's to take out."""
+    kept = []
     for p in np.asarray(route_ego, dtype=float).reshape(-1, 2):
         p = np.array([p[0], -p[1]])  # SimLingo's y is to the right
-        step = p - kept[-1]
-        if np.hypot(*step) < min_gap:
-            continue
-        if np.dot(step, kept[-1] - kept[-2]) <= 0.0:
-            continue
+        if kept:
+            step = p - kept[-1]
+            if np.hypot(*step) < min_gap:
+                continue
+            if len(kept) > 1 and np.dot(step, kept[-1] - kept[-2]) <= 0.0:
+                continue
         kept.append(p)
-    return np.array(kept)
+    first, on = kept[0], kept[min(3, len(kept) - 1)]
+    along = on - first
+    along = along / np.hypot(*along) if np.hypot(*along) > 0.0 else np.array([1.0, 0.0])
+    return np.array([first - d * along for d in np.arange(BEHIND, 0.0, -2.5)] + kept)
 
 
 def speed_reference(speed_wps, age=0.0):

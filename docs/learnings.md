@@ -74,6 +74,77 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The NMPC and the behaviour layer
 
+- **Keeping SimLingo's line where it is and not driving failed plans finishes route 1** (`path_points`, `expert/plan_hold.py`, candidates ranked solved first; results/bench2drive/nokink_hold, one run each at 2 Hz, 2 Nov). Route 1: 100 % for the
+  first time, 21.85 s, no infractions, no stop after the start, largest heading 14.9 deg, in the left lane by about 8 s, past the parked car, and on in lane keeping at 8 m/s. Failed plans 13 of 231 to 3 of 109; while moving in a manoeuvre 8 of 21 to 2 of 48;
+  median distance of the plan from the line 1.22 to 0.72 m. Route 0: 100 %. Route 8: 41.0 % (43.3), 2 m less, held by crossers as before; it now stays in a manoeuvre on 197 plans against 42. Route 10: 30.4 % (35.5), but it had no manoeuvre plans and
+  no failed plans, so neither fix acted on it: same crossers, run-to-run difference, and at rest 30 s now ends it before 70 s. Both still need todo 0. One run of route 1 is not a margin (repeat runs: below).
+- **Route 1's solves fail because the kink makes the path coordinates singular** (route 1 at 2 Hz; replay of 7.35-8.15 s). The model divides by `1 - kappa e` (`urban_nmpc.cpp:228`), which must stay positive: the car
+  must be inside the path's radius of curvature. At 7.55 s a new prediction moves the line 1.06 m (+0.37 to -0.69 at the car), the first point kept is (0.2, -0.69), so `path_points` joins at 74 deg: radius 0.2 m, heading error
+  61 deg at t = 0, and `1 - kappa e` goes down to -0.85 in that plan, -5.15 in the next (normal: 0.76-1.54). FATROP then takes steps of 1e-3 and stops at `max_iter` 100, the violation still 2-4 m, the status UNKNOWN. With the
+  line kept where it is: radius 1.8-6.3 m, `1 - kappa e` 0.87-1.08, the plans of 7.35-7.75 s solve in 11-35 ms, against 38-100; those after that start from the real run's swerve, so they say little.
+  Ruled out as the cause: car 3712 (dropped: the same plans fail), the warm start (cold: 2 of 8 solve, against 4), `max_iter` (300: 6 of 8 "solve", at 200-285 ms, 7 m off the path).
+- **Driving failed plans is what turns route 1's lane change into a swerve** (route 1 at 2 Hz, results/bench2drive/simlingo_2hz). The first turn is fine: heading steady at 11-12 deg to 7.35 s, -1.9 deg in all
+  under the good plans of 6.95-9.35 s. Then seven plans in a row fail (7.55-8.75 s) and the car takes them: +21.1 deg, to 42 deg. A failed plan took 110-153 ms against 30-50 ms, with up to 5.9 m of corridor slack in the
+  replay. Its steering is not to be trusted: replayed, the plans of 7.55 and 7.75 s gave the opposite sign (-0.12, -0.11 against +0.13, +0.25). Why they fail, beyond the kink and the mover above, is not shown:
+  status SOLVER_RET_UNKNOWN (iterations not reported). Manoeuvre plans failed while moving: 7 of 18 at 2 Hz, 5 of 10 and 1 of 5 at 1 Hz.
+- **In a lane change, a faster car behind in the target lane is only a mover, so the plan dodges it instead of deciding the merge** (route 1 at 2 Hz, results/bench2drive/simlingo_2hz, plan of
+  6.95 s, 7.1 on the video's bar; replay, open loop, its offsets smaller than the log's). SimLingo merges ahead of 3712, about 5.5 m behind and closing at 4.4 m/s (10.1 against 5.7), so about
+  1.3 s. `behind_now` sends it to `add_movers` (`behaviour.cpp:199`). The plan goes full throttle and up to about 2 m right of the line. With 3712 removed: acceleration 2.44 to -0.68,
+  offset at 2 s -0.34 to +0.26 m. With 3712 and the kink both removed, every plan to 7.55 s solves with corridor slack 0; with only 3712 removed the failure at 7.55 s stays, so the kink is
+  still needed. Lead 3705 removed: no effect on the offset's cause. The car is slow here as the plan held 5.7-6.5 m/s against the 9 or so SimLingo asked; why is not isolated.
+- **SimLingo at 2 Hz changes nothing on routes 0, 8 and 10 and leaves route 1 worse** (`SIMLINGO_EVERY` 10, results/bench2drive/simlingo_2hz, one run each, 2 Nov; 1 Hz:
+  rate_06, stays_out_body). Route 0 100 %, 8 43.3 %, 10 35.5 %, as before, with 0 failed plans of 350 on 8 and 10 (2 and 3 at 1 Hz). Route 1: 24.3 % at penalty 0.88 for
+  driving outside the route's lanes (score 21.3; 28.8 at 1 Hz, no infraction): the plan fails from 7.55 s and the car goes past SimLingo's line, y 5.9 against its 3.5 at 8.75 s, to rest
+  in the oncoming lane at y 6.9, 38 deg, 9.35 s. The same swerve as at 1 Hz, sooner. The plan's median distance from the line while moving in a manoeuvre fell, 3.1 to 1.2 m, so the
+  faster line does help the plan track it, on only 10-21 plans. Not yet shown why it swerves sooner: every new line is a new join to the car (todo 3), now twice as often.
+- **The steering-rate limit held inside a plan but not in the command, and holding it does not fix the kink** (results/bench2drive/stays_out_body, rate_06,
+  rate_03; route 1 and 0, one run each, 1 Nov). `delta_rate_max` bounds each plan, but a new plan could start elsewhere: route 1's command reached 8.26 rad/s,
+  over 0.6 on 38 % of ticks from 8.4 to 10 s; route 0's 2.52. `rate_limited` in the agent now holds it (0.6 max on both). Route 0 unchanged (100 %). Route 1 no
+  better: 28.8 % at 0.6, 22.8 % at 0.3 (plan and command both), and the plan's median distance from SimLingo's line while moving in a
+  manoeuvre went up, 2.2 to 3.1-3.2 m. It ended at y 5.7, 72 deg at 0.6 and y 4.6, 33 deg at 0.3, against y 1.5, 11 deg. A rate limit slows the response to
+  the kink's false heading error; it does not remove the error, and correcting later needs more room. Kept at 0.6, the value the plans assume; 0.3 rejected.
+- **A car counts only if it intends to use a lane the ego is using** (`Actors._stays_out`, `Route.ego_lanes`, `Actor::stays_out`; 1 Nov).
+  Decided on the map, not from boxes across the path: its lane at each predicted point against the path's lanes level with it, and whether its body
+  reaches 0.3 m into one of them or it moves towards one at over 0.3 m/s. Junctions, cars across their lane, parked cars, bikes, walkers and objects
+  are classified as before; `borrow_left` still sees them. **The ego's lanes must include those its body is in, not only the path's:** the first version
+  (results/bench2drive/stays_out) took the nose over the double yellow on route 1 and hit oncoming 3713, flagged as staying out, its first collision.
+  With that added (results/bench2drive/stays_out_body, one run each): route 0 100 %, one stop for the real cut-in; route 1 28.8 % (30.3), no infractions, the
+  7 s false stop and the swerve across the double yellow gone; route 8 43.3 % (43.3); route 10 35.5 % (35.5), both still held by junction crossers, as
+  expected. Route 1 now brakes at 9 s, mid lane change, to rest at y 1.5, then waits for good: the blocker holds it, and SimLingo itself asks to stop
+  on 123 of 145 plans. Replay at 8.55-9.35 s (less exact here than for the earlier run: steering off by up to 0.35 rad at one plan): keeping the line un-kinked
+  takes the plan from -7 to at most -3.2 m/s² with no failed solves; dropping lead 3705 alone changes nothing. So todo 3 is next.
+- **A reclaimed solver slot plans from a stale position, and a failed plan can still be chosen** (found reading f14a0aa, 1 Nov;
+  reproduced on the real `Behaviour`, a 598-piece straight, fixed route). `behaviour.cpp:391-393` gives a candidate the slot with its
+  label and no reset, and that slot's `s_last_` is from when it last ran, so `path_state` searches only -30 to +60 m round it. The
+  second time `borrow_left` appeared its plan began at s 163 with the car at s 335; the solve failed and it was chosen anyway (769
+  against 940), since the choice reads slack and score, not `Plan.success`. The agent is safe from the first part, as `set_route`
+  clears `s_last_` on every slot each plan; fixed-route use, such as the scenarios without `@local`, is not. The second part reaches the agent.
+- **The losing candidate sets the step time** (`URBAN_VERBOSE`, f14a0aa, 1 Nov). Threads join before scoring. In
+  `parked_car_overtake`, `base` takes 50-57 iterations and 55-61 ms on a problem it cannot meet (slack about 5.2), while the
+  chosen `borrow_left` takes 10 iterations and 12 ms; in `crossing_pass` it is 103.8 ms against 12.8. This is what puts both
+  `parked_car_overtake` variants over the 50 ms check (56.1 and 50.3 ms p95; the other 20 of 22 runs pass).
+- **Eight mover slots are eight circles, about 2.7 cars.** A car takes three. Given 12 circles, `n_movers` came back 8.
+- **The model has no guard at `1 - kappa e_y = 0`.** On a path of curvature about 1/3 1/m, e_y 2.0 solved, 2.9 failed at 0
+  iterations, and 3.2, past the singularity, reported success after 71.
+- **Route 1's lane change is undone by the path, not by the traffic in the lane it goes to** (results/bench2drive/fix_video, analysed
+  1 Nov; the logged plans replayed through the real `Behaviour` on a straight 4-lane stand-in for the map, open loop: bands, notes and
+  steering match the log, steering within 0.03 rad through the swerve). The road is 2 lanes our way (y 0, 3.2; stream at 8 m/s) and 2
+  oncoming (y 6.6, 9.9), so the lane SimLingo moves to is not oncoming, as this file and todo.md said. Earlier reports' "waits beside the parked
+  car" is wrong too: the car stands across the double yellow at y 5.3, 41 deg to the road. Three things in turn:
+  (1) **Stop, 6.55-7.15 s.** SimLingo moves left and asks for 8-10 m/s. Its line slants about 20 deg, which turns the box of oncoming car
+  3709, in its own lane throughout, to `ext_e` 1.58 from 0.90, and the band's left edge jumps from 2.6 to 3.4 at the same place (`Route.lanes`
+  takes `max` of offsets measured at other points on the path). One sample, t = 1 s, is in by 0.17 m. That is enough: `opposed` makes it a
+  lead, `urban_nmpc.cpp:457` clamps it to the car's front + 0.5 m, so the plan must stop in about 3 m (slack `ahead` 4.5 m, solve failed),
+  and the 26 m/s² brake does the rest: 6.5 m/s to rest in 0.4 s. Without oncoming cars the plan keeps 4.5-6.7 m/s at 1 s; without
+  the lead in the new lane, 3705, it still stops. Narrowing the band alone did not clear it in a rough test, as the box is most of it.
+  (2) **Swerve, 11.75-12.95 s.** No actor causes it: slack is in `corridor` (1.4-5 m), and it stays with the oncoming cars, parked car
+  or lead removed. Each new prediction (1 Hz) lands the line 0.2-0.4 m from the car, and `path_points` joins the car to it (the kink
+  above): the first metre runs 19-30 deg (44 deg on the spline), the next 2 deg. The plan's model then sees the car 50 deg off the path and
+  bound for y 1.0 (11.75 s), so it steers left at the 0.6 rad/s limit; the real car, 7 m/s and 0.5 rad, goes left to y 5.3. SimLingo's line stayed in
+  the lane at y 3. With the line kept where it is, at the same logged states: road-wheel 0.02-0.10 from 0.12-0.30 at 11.75-11.95 s, corridor
+  slack 0. Failed plans at 12.15 and 12.35 s (4.2 m off the path) were driven anyway.
+  (3) **Held for good, 13-70 s.** On a path 41 deg across the road the band is [-4.4, 6.4], every lane, so passing cars are "cut-ins" (note on 281
+  of 285 plans); SimLingo asks to stop on 7 of them. With the moving cars removed the replayed plan drives off.
 - **Without the two false stops route 0 does not stop at all; route 1 does not get better** (results/bench2drive/fix_rear_ghost,
   fix_ghost_only, fix_rear_ghost_70s, 1 Nov; one run each). Route 0: no rest after the start, 22.5 s against 30.55, 100 %, plans
   failed 3 of 112 against 13 of 153, slowest 1.1 m/s, for the real cut-in. Route 1, to 70 s: 30.3 % before, 27.3 % with the phantom

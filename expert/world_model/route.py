@@ -24,6 +24,7 @@ CONTINUE = 160.0  # [m] of lane continuation past SimLingo's last point
 JOIN = 10.0  # [m] over which the continuation joins its lane's centre
 BEHIND = 15.0  # [m] the lane's path reaches behind the car, so that actors and stops just behind it project onto it
 LOOK = 200.0  # [m] stop lines and stop signs further from the car than this are not looked at
+BODY = (2.6, 1.2)  # [m] half the car's length and width, with a little over: the corners that say which lanes it is in
 
 
 def _xy(location):
@@ -34,7 +35,7 @@ def _angle(a):
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
-def _lane_key(wp):
+def lane_key(wp):
     return wp.road_id, wp.section_id, wp.lane_id
 
 
@@ -76,6 +77,7 @@ class Route:
         sparse plan, which every agent is given), or None."""
         self.ex, self.carla, self.map = expertctl, carla, carla_map
         self.route_end = route_end_xy
+        self._ego_lanes, self._body_lanes = [], set()  # from the last lanes()
         self.lights = []  # (light, x, y, psi) of each stop waypoint
         for light in world.get_actors().filter("traffic.traffic_light"):
             for wp in light.get_stop_waypoints():
@@ -184,14 +186,20 @@ class Route:
             road = [self._road_edge(across, wp, left=False), self._road_edge(across, wp, left=True)]
             rows.append({"lo": band[0], "hi": band[1], "left": left.lane_width if left_ok else 0.0,
                          "oncoming": bool(left_ok and across.against(left)),
-                         "allowed": bool(left_ok), "road": tuple(road), "lane": _lane_key(wp),
-                         "neighbours": tuple(_lane_key(n) for n in (left, right) if self._drivable(n))})
+                         "allowed": bool(left_ok), "road": tuple(road), "lane": lane_key(wp),
+                         "neighbours": tuple(lane_key(n) for n in (left, right) if self._drivable(n))})
         sections = []
+        self._ego_lanes = []
+        corners = [self._waypoint(*frame.to_world(a * BODY[0], b * BODY[1]), frame.z) for a in (-1, 1) for b in (-1, 1)]
+        self._body_lanes = {lane_key(wp) for wp in corners if wp is not None and not wp.is_junction}
         for i, row in enumerate(rows):
             lo, hi = row["lo"], row["hi"]
+            used = None if row["lane"] is None else {row["lane"]}
             for other in rows[max(0, i - window): i + window + 1]:  # a lane change: both lanes
                 if other["lane"] is not None and other["lane"] in row["neighbours"]:
                     lo, hi = min(lo, other["lo"]), max(hi, other["hi"])
+                    used.add(other["lane"])
+            self._ego_lanes.append(used)
             road_lo, road_hi = min(row["road"][0], lo), max(row["road"][1], hi)
             key = (round(lo, 1), round(hi, 1), round(row["left"], 1), row["oncoming"], row["allowed"],
                    round(road_lo, 1), round(road_hi, 1))
@@ -205,6 +213,17 @@ class Route:
         out[-1].s_to = float("inf")
         return out
 
+    def ego_lanes(self, path, x, y):
+        """The map lanes the car is using level with the car-frame point (x, y), as of the last `lanes()`: the path's
+        lane there, both lanes where the path changes lane, one row either side as a lane's ids change along it; and
+        whatever lanes the car's body is in now, wherever the path goes. None where that cannot be said (a junction, or
+        the path's lane crossing it)."""
+        i = int(path.project(x, y)[0] / SPACING)
+        rows = self._ego_lanes[max(0, i - 1): i + 2]
+        if not rows or any(row is None for row in rows):
+            return None
+        return set().union(*rows) | self._body_lanes
+
     def _drivable(self, wp):
         return wp is not None and wp.lane_type in (self.carla.LaneType.Driving, self.carla.LaneType.Bidirectional)
 
@@ -212,13 +231,13 @@ class Route:
         """The offset across the path of the road's edge on one side: the outer edge of the outermost driving lane
         reached from wp through neighbouring driving lanes (oncoming ones too)."""
         edge = across.cut(wp)[1 if left else 0]
-        seen = {_lane_key(wp)}
+        seen = {lane_key(wp)}
         cur = wp
         for _ in range(8):
             cur = across.neighbour(cur, left)
-            if not self._drivable(cur) or _lane_key(cur) in seen:
+            if not self._drivable(cur) or lane_key(cur) in seen:
                 break
-            seen.add(_lane_key(cur))
+            seen.add(lane_key(cur))
             band = across.cut(cur)
             if band is None:
                 break

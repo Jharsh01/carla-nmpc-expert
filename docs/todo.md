@@ -4,18 +4,17 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
 [learnings.md](learnings.md). Last updated 1 November 2026, on lane-band-worker-timing. Latest report:
 [reports/2026-11-01-lane-keeping-and-traffic](reports/2026-11-01-lane-keeping-and-traffic/README.md).
 
-## Now: route 0 drives; the car does not get through traffic on routes 1, 8 and 10
+## Now: routes 0 and 1 drive; the car does not get through traffic on routes 8 and 10
 
-0. **The car waits for good in steady traffic: routes 1, 8 and 10 end on the 70 s watchdog** (30 %, 43 %, 35 %;
+0. **The car waits for good in steady traffic: routes 8 and 10 end on the watchdog** (43 %, 35 %;
    results/bench2drive/intent_z, 31 Oct, no collisions). Routes 8 and 10 face a stream of cars at 13 and 10 m/s about 2 s
    apart (route 8's is `flow_speed` 13 m/s with 24-26 m spacing, at constant speed, ignoring other vehicles until any of
    them collides: ActorFlow). Every plan there has a crosser due within 3 s, and each crosser's gate is widened by `gate_buffer` (1 s) either
    side, so the base candidate never gets a gap, and `pass:` needs one too. SimLingo asks to stop on only 17 % and 28 % of
    those plans, so it is the behaviour layer holding the car. On route 8 every plan also has a window "to inf": the stream comes from the left and runs down the exit lane (rebuilt
    from the log: x 2537, e 0 on the path after the merge), so it is traffic to merge with, treated as crossers and not
-   leads (`crossing_kind` is read at t = 0 only). On route 1 the
-   neighbouring lane has the same stream and "blocker: oncoming traffic, waiting". The old path gave the same waits on
-   routes 1 and 10. Plain SimLingo enters route 8's stream (100 %, but 11.5 s for 78.6 m looks over-counted). Design for
+   leads (`crossing_kind` is read at t = 0 only). Route 1 is no longer in this group: it finishes (results/bench2drive/nokink_hold, learnings.md). The old path gave the same waits on
+   route 10. Plain SimLingo enters route 8's stream (100 %, but 11.5 s for 78.6 m looks over-counted). Design for
    this: conflicts, a registry with a lifecycle, a phase, and one space-time tube per plan compiled into the NMPC's fixed
    slots (https://claude.ai/artifact/5mgXZSJodoQ7Sk3Cf27chh; not implemented). First step: stream cars as merges and cars
    behind as none in `behaviour.cpp`, tested on routes 0 and 8. Before building the merge, decide the minimum margin and
@@ -37,10 +36,10 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    d. Repeat route 0 with the fixes: repeat runs are not independent (learnings.md), and this is one run.
    video_route0_oct31's stall is still unexplained: its log has no path, and the full lock there was not reproduced. The new logs
    have the path, so the next one can be replayed.
-3. **The path is still forced through the car while following SimLingo** (`simlingo_ref.path_points`, the kink in
-   learnings.md), so turns and lane changes can weave as the old path did. Use `_path`'s lane-keeping idea there too:
-   keep SimLingo's line where it is and let the NMPC see the offset. Also open: the agent drives failed plans (13 of 140
-   on route 0), steering jumps at each new plan, and the yaw rate at 0.77 of `v tan(delta) / 2.87`.
+3a. **A lane change has no merge decision.** A faster car behind in the target lane is a mover, so the plan swerves round it (learnings.md). Route 1 now gets by without one, on one run. Choose: go ahead
+   of it at SimLingo's speed if the gap holds, or slot in behind it.
+3. **Still open from the plans:** steering jumps at each new plan are capped but not explained, and the yaw rate is at 0.77 of `v tan(delta) / 2.87`. A failed plan is now held, then braked on (`expert/plan_hold.py`): `HOLD` 0.6 s and
+   `BRAKE` -2 are first guesses, and the brake under 6.5 m/s is still item 2b's. `1 - kappa e` is not guarded: a sharp bend in SimLingo's own line could still break it.
 4. **A car cutting in close ahead is a mover (swerve), not a lead (brake).** On route 0 the cut-in car (3697)
    pulled into the lane 5 m ahead with no "cut-in" note; the NMPC steered round it to full lock. The road edge now
    stops that ending off the road, but braking is the right answer. Check how `behaviour.cpp` classifies it.
@@ -55,6 +54,13 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    (36 ms a plan). Real time needs more cores (CARLA and the loop on their own) and a faster `Actors.detect`; check
    too whether `--debug` (SimLingo's frames, which the agent no longer draws) is still wanted. See learnings.md.
 
+## Found reading the code (1 November, at f14a0aa; learnings.md)
+
+19. **Choosing a candidate ignores `Plan.success`** (`behaviour.cpp:431-438`), so a failed plan can win. Reaches the agent; goes
+    with item 13.
+20. **Reset a reclaimed solver slot's `s_last_`** (`behaviour.cpp:391-393`). Fixed routes only: `set_route` clears it in the agent.
+21. **A candidate that cannot be met holds the step for its full solve:** look at bounding it, for items 6 and 11.
+
 ## Next
 
 9. **Run routes 0–21** with `--agent simlingo_nmpc --no-cot --fast` and compare with SimLingo + PID on the same
@@ -65,7 +71,7 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
 11. **The offline solve-time check:** both `parked_car_overtake` variants are at 52–59 ms p95 against 50 ms. Tune, or
    decide the limit.
 12. **Steering-rate limit 0.6 rad/s in CARLA:** check tight, slow junction turns on a route (1.5 was used before).
-13. **A fallback for a failed or late solve:** follow the last plan, then brake at the friction limit (plan, section 2).
+13. **A fallback for a late solve:** a failed one is done (`expert/plan_hold.py`); one that is late is not.
 
 ## Housekeeping
 

@@ -137,3 +137,41 @@ def test_lanes_are_looked_up_at_the_cars_height():
     route = _route(_road((-1, 0.0, LaneType.Driving), (1, 180.0, LaneType.Driving)))
     route.lane_path(frames.Frame(10.0, -route.map.lanes[0].y, 0.0, 358.0))
     assert route.map.z == 358.0
+
+
+def _lanes_on(route, path, frame):
+    route.lanes(path, frame)
+    return lambda x, y: route.ego_lanes(path, x, y)
+
+
+def test_ego_lanes_are_the_paths_lane_and_both_lanes_of_a_lane_change():
+    # from the left: an oncoming lane, a lane our way, the car's lane (CARLA y = 0), a shoulder
+    route = _route(_road((1, 180.0, LaneType.Driving), (-2, 0.0, LaneType.Driving), (-1, 0.0, LaneType.Driving),
+                         (-3, 0.0, LaneType.Shoulder)))
+    frame = frames.Frame(0.0, 0.0, 0.0)
+    straight = _path([(x, 0.0) for x in range(-15, 100, 2)])
+    used = _lanes_on(route, straight, frame)
+    assert {k[2] for k in used(20.0, 0.0)} == {-1}
+    assert {k[2] for k in used(20.0, 3.0)} == {-1}  # level with the point: still the car's lane
+    change = _path([(x, 0.0) for x in range(-15, 20, 2)] + [(x, 3.0) for x in range(30, 100, 2)])
+    used = _lanes_on(route, change, frame)
+    assert {k[2] for k in used(25.0, 1.5)} == {-1, -2}
+    assert {k[2] for k in used(80.0, 3.0)} == {-2, -1}  # far along it: its lane, and the one the car's body is in now
+
+
+def test_ego_lanes_are_unknown_in_a_junction():
+    route = _route(_road(*TWO_WAY))
+    route._ego_lanes = [{(1, 0, -1)}, None, None, {(1, 0, -1)}, {(1, 0, -1)}, {(1, 0, -1)}]
+    path = _path([(x, 0.0) for x in range(0, 30, 2)])
+    assert route.ego_lanes(path, 2.0, 0.0) is None
+    assert route.ego_lanes(path, 9.0, 0.0) == {(1, 0, -1)}
+
+
+def test_ego_lanes_take_in_any_lane_the_cars_body_is_in():
+    """Bench2Drive route 1: stood across the double yellow, nose in the oncoming lane, with the path back in its own: a
+    car in that lane was taken to stay out of the car's way, and it hit the car."""
+    route = _route(_road(*TWO_WAY))
+    frame = frames.Frame(0.0, 1.0, math.radians(45.0))  # library's y: 1 m to the left of the lane's centre, turned left
+    path = _path([(x, -x) for x in range(-10, 60, 2)])  # in the car's frame: back along the lane
+    used = _lanes_on(route, path, frame)
+    assert {k[2] for k in used(20.0, -20.0)} == {-1, 1}

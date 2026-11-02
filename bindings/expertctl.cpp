@@ -164,6 +164,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("length", &ex::Actor::length)
         .def_readwrite("width", &ex::Actor::width)
         .def_readwrite("parked", &ex::Actor::parked)
+        .def_readwrite("stays_out", &ex::Actor::stays_out)
         .def_readwrite("t", &ex::Actor::t)
         .def_readwrite("x", &ex::Actor::x)
         .def_readwrite("y", &ex::Actor::y)

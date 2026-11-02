@@ -6,7 +6,7 @@
 #
 #   scripts/run_bench2drive.sh --agent simlingo_nmpc --routes 0-9   SimLingo through the urban NMPC
 #                                                                   (expert/agents/simlingo_nmpc_agent.py),
-#                                                                   SimLingo predicting at 1 Hz, the NMPC at 5 Hz
+#                                                                   SimLingo predicting at 2 Hz, the NMPC at 5 Hz
 #   scripts/run_bench2drive.sh --agent simlingo ...                 SimLingo with its PID, as published (the default)
 #
 #   scripts/run_bench2drive.sh                       all 220 routes (days on one GPU: see below)

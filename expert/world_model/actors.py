@@ -17,6 +17,7 @@ import math
 import numpy as np
 
 from expert import frames
+from expert.world_model.route import lane_key
 
 HORIZON, STEP = 5.0, 0.25  # [s] of each predicted trajectory
 # Bench2Drive spawns the parked cars along the route as static.prop.mesh actors with car meshes
@@ -24,6 +25,12 @@ HORIZON, STEP = 5.0, 0.25  # [s] of each predicted trajectory
 # Charger reports 3.0 x 3.9 m; on Town12 they came out 2.0 x 4.3 m, a car turned sideways): taken as parked cars of
 # this size, along the actor's heading, as a detector would report them
 PARKED_CAR = (4.8, 2.0)  # length, width [m]
+# A car intends to use a lane if it is in it, is predicted in it, reaches into it or is moving into it:
+INTENT_SAMPLES = 4  # steps between the predicted points looked up on the map
+INTENT_REACH = 0.3  # its body this far over a lane's edge is in that lane [m]
+INTENT_DRIFT = 0.3  # sideways speed across its lane that means something (the tracker's noise is under it) [m/s]
+INTENT_AHEAD = 3.0  # how far ahead a sideways motion is carried on [s]
+INTENT_ALIGNED = 35.0  # further than this off its lane's direction a car is crossing, not going along it [deg]
 
 
 class Track:
@@ -227,10 +234,51 @@ class Actors:
         psi = np.interp(dist, travelled, psis)
         return times, x, y, psi
 
-    def scene_actors(self, t, frame):
+    def _stays_out(self, track, actor, frame, ego_lanes):
+        """Whether a vehicle has no intent to use the lanes the ego is using: on a lane of its own and going along it, at
+        every predicted point on a different lane from the ego's level with it, and neither reaching into one of the
+        ego's lanes nor moving into one. `ego_lanes(x, y)`: Route.ego_lanes, for a car-frame point. Anything that cannot
+        be told from the map (a junction, off the lanes, across them) has intent, so that it goes on being classified."""
+        if track.kind != "vehicle" or actor.parked:
+            return False
+        driving = self.carla.LaneType.Driving
+        where = track.actor.get_location()
+        wp = self.map.get_waypoint(where, project_to_road=True, lane_type=driving)
+        if wp is None or wp.is_junction:
+            return False
+        yaw = track.actor.get_transform().rotation.yaw
+        off_lane = abs((wp.transform.rotation.yaw - yaw + 180.0) % 360.0 - 180.0)
+        if off_lane > INTENT_ALIGNED:
+            return False
+        for i in range(0, len(actor.t), INTENT_SAMPLES):
+            mine = ego_lanes(actor.x[i], actor.y[i])
+            if mine is None:
+                return False
+            x, y = frames.to_carla_xy(*frame.to_world(actor.x[i], actor.y[i]))
+            at = self.map.get_waypoint(self.carla.Location(x, y, where.z), project_to_road=True, lane_type=driving)
+            if at is None or at.is_junction or lane_key(at) in mine:
+                return False
+        mine = ego_lanes(actor.x[0], actor.y[0])
+        lane_yaw = frames.from_carla_yaw(wp.transform.rotation.yaw)
+        left = (-math.sin(lane_yaw), math.cos(lane_yaw))
+        lx, ly = frames.from_carla_xy(wp.transform.location.x, wp.transform.location.y)
+        offset = (track.history[-1][1] - lx) * left[0] + (track.history[-1][2] - ly) * left[1]
+        vx, vy = track.velocity()
+        drift = vx * left[0] + vy * left[1]
+        half = 0.5 * wp.lane_width
+        for side, beside in ((1.0, wp.get_left_lane()), (-1.0, wp.get_right_lane())):
+            if beside is None or lane_key(beside) not in mine:
+                continue
+            reach = side * offset + 0.5 * track.width - half  # how far over that edge
+            if reach > INTENT_REACH or (side * drift > INTENT_DRIFT and reach + side * drift * INTENT_AHEAD > 0.0):
+                return False
+        return True
+
+    def scene_actors(self, t, frame, ego_lanes=None):
         """expertctl.Actor for every track, with its predicted trajectory, in the car's frame (`frame`: the car's
         true pose, as a detector on the car reports what it sees relative to the car). The tracks themselves are kept
-        in the world, where they stand still when the car moves."""
+        in the world, where they stand still when the car moves. With `ego_lanes` (Route.ego_lanes for this plan's
+        path, for a car-frame point), each actor's `stays_out` is worked out."""
         ex = self.ex
         kinds = {"vehicle": ex.Actor.Kind.vehicle, "bike": ex.Actor.Kind.bike, "walker": ex.Actor.Kind.walker,
                  "object": ex.Actor.Kind.object}
@@ -261,6 +309,12 @@ class Actors:
             times, x, y, psi = predicted
             cx, cy = frame.to_car(np.asarray(x, dtype=float), np.asarray(y, dtype=float))
             a.t, a.x, a.y, a.psi = [list(map(float, v)) for v in (times, cx, cy, np.asarray(psi) - frame.psi)]
+            if ego_lanes is not None:
+                try:
+                    a.stays_out = self._stays_out(track, a, frame, ego_lanes)
+                except RuntimeError:
+                    gone.append(track.id)
+                    continue
             out.append(a)
         for aid in gone:
             del self.tracks[aid]

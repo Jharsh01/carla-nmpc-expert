@@ -19,7 +19,7 @@ its path carried into the car's frame now by odometry and its speeds taken from 
 PLAN_EVERY ticks a new path, the scene and a behaviour step (core/urban), the step solved on the NMPC's own CPUs and
 its plan taken NMPC_LATENCY ticks later. SimLingo's path is planned along only while it is a manoeuvre, a lane change
 or a turn (it leaves the lane the car is in: expertctl.PathIntent); otherwise the NMPC keeps to the lane's centre, and
-SimLingo's speeds count only when they ask to stop. Then the plan sampled a little ahead (by the actuation's lags) for the
+SimLingo's speeds count only when they ask to stop. A plan that fails to solve is never driven (expert/plan_hold.py). Then the plan sampled a little ahead (by the actuation's lags) for the
 acceleration and road-wheel angle, and those as throttle, brake and steer (expert/mkz_actuation.py). Both latencies
 are counted in ticks, not wall-clock time, so a run does not depend on how fast the machine is: if a result is not
 ready when due, the tick waits for it. SimLingo's restart creep (forced throttle after a long stop) is off: the NMPC
@@ -50,14 +50,15 @@ from srunner.scenariomanager.carla_data_provider import CarlaDataProvider  # noq
 
 import expertctl  # noqa: E402
 from expert import cpus, frames, live_view, simlingo_ref, timing  # noqa: E402
-from expert.mkz_actuation import MKZActuation  # noqa: E402
+from expert.mkz_actuation import MKZActuation, rate_limited  # noqa: E402
+from expert.plan_hold import PlanHold  # noqa: E402
 from expert.world_model.actors import Actors  # noqa: E402
 from expert.world_model.route import Route  # noqa: E402
 
 DT = 0.05  # [s] a tick
 PLAN_EVERY = 4  # ticks between plans (5 Hz)
 NMPC_LATENCY = 1  # ticks from a plan's scene to its use: the NMPC has 50 ms, as it would in a car
-SIMLINGO_EVERY = 20  # ticks between SimLingo's predictions (1 Hz)
+SIMLINGO_EVERY = 10  # ticks between SimLingo's predictions (2 Hz)
 SIMLINGO_LATENCY = 6  # ticks from SimLingo's camera frame to its prediction's use: on its own core of an L4
                       # machine it takes 290 ms (60 preprocessing, 230 the model), so 300 ms would hold in real time
 METRIC_EVERY = 200  # ticks between writes of SimLingo's metric_info.json (and at the end)
@@ -254,8 +255,9 @@ class SimLingoNMPCAgent(LingoAgent):
         self.odometry = simlingo_ref.Odometry()
         self.ticks = 0
         self.plan = self.decision = self.job = None
+        self.hold = PlanHold()
         self.t_plan = 0.0
-        self.steer = self.a_filtered = 0.0
+        self.steer = self.a_filtered = self.delta_command = 0.0
         self.logged_step = None  # the last prediction written to the log
         self.intent = expertctl.PathIntent()
         save = os.environ.get("SAVE_PATH")
@@ -328,7 +330,7 @@ class SimLingoNMPCAgent(LingoAgent):
             with timing.stage("nmpc.lanes"):
                 scene.lanes = self.route.lanes(path, frame)
             with timing.stage("nmpc.scene_actors"):
-                scene.actors = self.actors.scene_actors(t, frame)
+                scene.actors = self.actors.scene_actors(t, frame, lambda x, y: self.route.ego_lanes(path, x, y))
             with timing.stage("nmpc.stops"):
                 scene.stops = self.route.stops(path, s_now, frame)
             self.job = _Job(self.nmpc_thread.submit(self.behaviour.step, scene), self.ticks, t, scene, path, s_now,
@@ -339,7 +341,8 @@ class SimLingoNMPCAgent(LingoAgent):
             with timing.stage("nmpc.wait"):
                 self.decision = job.future.result()
             timing.flag("solve_ms", round(1e3 * self.decision.wall_time, 2))
-            self.plan, self.t_plan = self.decision.plan, job.t
+            self.hold.update(self.decision.plan, job.t)
+            self.plan, self.t_plan = self.hold.plan, self.hold.t
             if self.live is not None:
                 try:  # the view must never stop the driving
                     with timing.stage("nmpc.live"):
@@ -353,14 +356,17 @@ class SimLingoNMPCAgent(LingoAgent):
         since = t - self.t_plan
         a_ref = self._plan_at(since + 0.25, 4)  # the acceleration a lag ahead: the drivetrain takes that long
         delta_ref = self._plan_at(since + 0.15, 5)  # the steering's lag (scripts/identify_ego.py)
+        delta_ref = self.delta_command = rate_limited(delta_ref, self.delta_command, self.params.delta_rate_max, DT)
         if self._plan_at(since, 3) < 0.2 and self._plan_at(since + 1.0, 3) < 0.2:
             a_ref = min(a_ref, -1.0)  # planned at rest: hold the brake
+        a_ref = min(a_ref, self.hold.a_limit(t))
         throttle, brake, steer = self.actuation.command(a_ref, delta_ref, speed, self.a_filtered)
         self.steer = steer
         if self.log_file is not None:
             row = {"t": round(t, 3), "v": speed, "a": self.a_filtered, "a_ref": a_ref, "delta_ref": delta_ref,
                    "throttle": throttle, "brake": brake, "steer": steer, "label": self.decision.label,
                    "step_ms": 1e3 * self.decision.wall_time if job else 0.0, "success": self.decision.plan.success,
+                   "holding": self.hold.failed_since is not None,
                    "n_actors": len(self.actors.tracks), "notes": list(self.decision.notes) if job else []}
             true = frames.Frame.of(self.hero.get_transform())
             row["pose"] = [round(true.x, 3), round(true.y, 3), round(true.psi, 5)]  # for the video and analysis only
@@ -380,14 +386,16 @@ class SimLingoNMPCAgent(LingoAgent):
         for a in scene.actors:
             s, e = path.project(a.x[0], a.y[0])
             actors.append([a.id, str(a.kind).split(".")[-1], bool(a.parked), round(s - s_now, 1), round(e, 2),
-                           round(a.length, 1), round(a.width, 1), round(math.hypot(a.x[-1] - a.x[0], a.y[-1] - a.y[0]), 1)])
+                           round(a.length, 1), round(a.width, 1), round(math.hypot(a.x[-1] - a.x[0], a.y[-1] - a.y[0]), 1),
+                           bool(a.stays_out)])
         lane = next((l for l in scene.lanes if l.s_from <= s_now < l.s_to), scene.lanes[-1])
-        early = np.asarray(self.plan.times) <= 2.0
-        dv = self._plan_at(1.0, 3) - float(np.interp(1.0, scene.v_ref_t, scene.v_ref)) if scene.v_ref else 0.0
+        plan = self.decision.plan  # the one just solved, on this path, though it may not be the one driven
+        early = np.asarray(plan.times) <= 2.0
+        dv = float(np.interp(1.0, plan.times, plan.x[:, 3])) - float(np.interp(1.0, scene.v_ref_t, scene.v_ref)) if scene.v_ref else 0.0
         return {"scene": {"actors": actors, "lane": [round(lane.lo, 2), round(lane.hi, 2), round(lane.left_width, 2)],
                           "stops": [[str(st.kind).split(".")[-1], round(st.s - s_now, 1)] for st in scene.stops],
                           "simlingo_reach": round(s_simlingo - s_now, 1)},
-                "override": [round(float(np.max(np.abs(self.plan.x[early, 1]))), 3), round(dv, 3)]}
+                "override": [round(float(np.max(np.abs(plan.x[early, 1]))), 3), round(dv, 3)]}
 
     def _geometry(self, job):
         """The plan's lines for the video and analysis, in the car's frame (y left) at the true pose `frame`: SimLingo's
@@ -395,7 +403,7 @@ class SimLingoNMPCAgent(LingoAgent):
         prediction as SimLingo made it (y right), once."""
         pose = [job.frame.x, job.frame.y, job.frame.psi]
         q = [job.path.pose(float(s)) for s in np.arange(max(0.0, job.s_now - 15.0), min(job.path.length, job.s_now + 40.0), 1.0)]
-        plan = [job.path.pose(float(s), float(e)) for s, e in self.plan.x[:, :2]]
+        plan = [job.path.pose(float(s), float(e)) for s, e in self.decision.plan.x[:, :2]]
         row = {"frame": [round(float(v), 3) for v in pose[:2]] + [round(float(pose[2]), 5)],
                "simlingo": np.round(np.asarray(job.route) * [1.0, -1.0], 3).tolist(),
                "path": [[round(p.x, 3), round(p.y, 3)] for p in q],

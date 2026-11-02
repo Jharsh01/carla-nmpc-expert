@@ -9,15 +9,28 @@ import pytest
 from expert import frames, simlingo_ref
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 
 
 def test_path_points_in_the_cars_frame():
     # SimLingo's y is to the right; the path's is to the left
     route = [[0.2, 0.0], [1.0, 0.0], [1.3, 0.0], [2.0, 0.1], [1.5, 0.1], [3.0, 0.2]]
     pts = simlingo_ref.path_points(route)
-    assert pts[0] == pytest.approx([-simlingo_ref.BEHIND, 0.0])
+    assert pts[0, 0] == pytest.approx(0.2 - simlingo_ref.BEHIND, abs=0.1)
     assert np.all(np.diff(pts[:, 0]) > 0.0)  # always on forwards
-    assert pts[-3:] == pytest.approx(np.array([[1.0, 0.0], [2.0, -0.1], [3.0, -0.2]]))  # 0.2, 1.3 too close, 1.5 back
+    # 1.3 too close, 1.5 back
+    assert pts[-4:] == pytest.approx(np.array([[0.2, 0.0], [1.0, 0.0], [2.0, -0.1], [3.0, -0.2]]))
+
+
+def test_the_path_keeps_the_line_where_it_is_and_does_not_bend_to_the_car():
+    """Bench2Drive route 1: a new prediction 0.69 m to the right of the car, first point 0.2 m ahead. Joined to the car
+    that was a turn of 74 deg, radius 0.2 m, and the plans failed."""
+    route = [[0.2 + k, 0.69] for k in range(20)]  # SimLingo's: y right
+    pts = simlingo_ref.path_points(route)
+    assert pts[:, 1] == pytest.approx(-0.69)  # straight, the car 0.69 m to its left
+    path = expertctl.Path.from_waypoints([list(p) for p in pts], False)
+    assert max(abs(path.curvature(s)) for s in np.arange(0.0, path.length, 0.1)) < 0.01
+    assert path.project(0.3, 0.0)[1] == pytest.approx(0.69)
 
 
 def test_speed_reference_with_and_without_the_car_first():
