@@ -1,5 +1,6 @@
 #include "urban/vehicle_params.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -30,7 +31,22 @@ VehicleParams VehicleParams::from_file(const std::string& path) {
         if (!values.contains(field.name)) throw std::runtime_error(path + ": no value for " + field.name);
         p.*field.member = values.at(field.name).at("value");
     }
+    const auto& table = data.at("vehicle").at("tables").at("a_drive_max");
+    p.a_drive_speed = table.at("speed").get<std::vector<double>>();
+    p.a_drive_max = table.at("value").get<std::vector<double>>();
+    if (p.a_drive_speed.size() != p.a_drive_max.size() || p.a_drive_speed.size() < 2 ||
+        !std::is_sorted(p.a_drive_speed.begin(), p.a_drive_speed.end()))
+        throw std::runtime_error(path + ": a_drive_max needs two or more ascending speeds, one value each");
     return p;
+}
+
+double VehicleParams::a_drive(double v) const {
+    const auto& xs = a_drive_speed;
+    const auto& ys = a_drive_max;
+    if (v <= xs.front()) return ys.front();
+    if (v >= xs.back()) return ys.back();
+    const size_t i = std::upper_bound(xs.begin(), xs.end(), v) - xs.begin();
+    return ys[i - 1] + (ys[i] - ys[i - 1]) * (v - xs[i - 1]) / (xs[i] - xs[i - 1]);
 }
 
 }  // namespace ex

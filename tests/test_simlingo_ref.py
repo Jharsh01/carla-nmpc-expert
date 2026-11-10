@@ -141,11 +141,11 @@ def test_set_route_into_the_cars_frame():
         assert moved.iterations <= same.iterations + 2
 
 
-def test_behaviour_set_route():
+def test_planner_set_route():
     params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
-    options = expertctl.BehaviourOptions()
+    options = expertctl.PlannerOptions()
     options.pool = 1
-    b = expertctl.Behaviour(expertctl.Path.from_waypoints([[0.0, 0.0], [400.0, 0.0]], False), params,
+    b = expertctl.Planner(expertctl.Path.from_waypoints([[0.0, 0.0], [400.0, 0.0]], False), params,
                             expertctl.Body(), expertctl.UrbanOptions(), options)
     scene = expertctl.Scene()
     scene.ego = expertctl.Ego(x=20.0, v=8.0)
@@ -162,15 +162,15 @@ def test_behaviour_set_route():
 
 
 def test_live_view_serves_a_plan():
-    """A behaviour step on a small scene, its snapshot published, and the page and the stream read back."""
+    """A planner step on a small scene, its snapshot published, and the page and the stream read back."""
     import json
     import urllib.request
     from expert import live_view
     params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
-    options = expertctl.BehaviourOptions()
+    options = expertctl.PlannerOptions()
     options.pool = 2
     path = expertctl.Path.from_waypoints([[-15.0, 0.0], [0.0, 0.0], [200.0, 0.0]], False)
-    b = expertctl.Behaviour(path, params, expertctl.Body(), expertctl.UrbanOptions(), options)
+    b = expertctl.Planner(path, params, expertctl.Body(), expertctl.UrbanOptions(), options)
     scene = expertctl.Scene()
     scene.ego = expertctl.Ego(x=0.3, v=6.0)
     scene.v_max = 8.0

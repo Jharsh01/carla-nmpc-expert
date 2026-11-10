@@ -44,6 +44,31 @@ uses. The rest of CARLA's physics settings are below, for reference.
 | `delta_rate_max` | 0.6 rad/s | Design choice. CARLA steers with no rate limit, only a 0.15 s lag. At 1.5 rad/s the offline overtakes (`sim/urban`, whose kinematic plant lags 0.25 s on acceleration and 0.05 s on steering) steer back faster than the lagged plant follows, overshoot the lane and swerve; 1.0 is borderline. |
 | `g` | 9.81 m/s² | Constant. |
 
+### Drive acceleration against speed (`tables.a_drive_max`)
+
+The strongest acceleration the engine gives at each speed, on level ground: full throttle, measured by
+`scripts/identify_ego.py` (the `1.0` row of `config/vehicles/mkz2020_actuation.json`). Linear between the speeds,
+held beyond them (no reading above 25 m/s). The NMPC's limit is the lower of this and `UrbanNMPC::Options::a_max`
+(0.5 g, 4.9 m/s²), taken at the car's speed at the start of each solve and held over the horizon (the speed changes
+little in the 0.1 s between solves). The overtake's clear check follows it through the whole pass
+(`Constraints::drive`), as the speed changes too much over several seconds to hold it.
+
+| Speed [m/s] | Full throttle [m/s²] | NMPC limit [m/s²] |
+| ---: | ---: | ---: |
+| 0 | 5.43 | 4.91 |
+| 2.5 | 6.29 | 4.91 |
+| 5 | 6.80 | 4.91 |
+| 7.5 | 5.17 | 4.91 |
+| 10 | 4.60 | 4.60 |
+| 12.5 | 3.83 | 3.83 |
+| 15 | 3.43 | 3.43 |
+| 17.5 | 2.96 | 2.96 |
+| 20 | 2.90 | 2.90 |
+| 22.5 | 2.63 | 2.63 |
+| 25 | 2.10 | 2.10 |
+
+Above about 9 m/s the car cannot reach 0.5 g: it is power-limited (acceleration × speed stays near 46–58 m²/s³).
+
 Throttle, brake and steering responses measured by `scripts/identify_ego.py` (dead zone, acceleration against
 speed, steering gain and lag) are in `config/vehicles/mkz2020_actuation.json`, which `expert/mkz_actuation.py` uses.
 

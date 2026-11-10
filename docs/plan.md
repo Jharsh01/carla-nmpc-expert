@@ -57,7 +57,7 @@ start new candidates from the chosen plan to cut cold-start solve times.
 - `LingoAgent` subclassed, `control_pid` overridden: SimLingo still predicts every tick; the NMPC replaces its PID.
 - **The route is SimLingo's** (`expert/simlingo_ref.py`). Its 20 path points (about 1 m apart) become the NMPC's
   `Path` as they are, in the car's frame, rebuilt at every plan. The Scene's line is that path.
-- **The NMPC plans in the car's frame**: the car at the origin, no global position. `Behaviour::set_route` carries
+- **The NMPC plans in the car's frame**: the car at the origin, no global position. `Planner::set_route` carries
   the previous plan into the new frame, given the old frame's pose in the new one, from odometry (speedometer and
   compass, `simlingo_ref.Odometry`). The world model reports its actors, lanes and stops in the car's frame
   (`frames.Frame`, from the car's true pose: the stand-in for sensors on the car). An earlier version placed the

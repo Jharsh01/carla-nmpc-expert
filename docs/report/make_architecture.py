@@ -202,7 +202,7 @@ def fig_system():
          FILL["world"])
     _box(ax, 0.17, row(2) - 0.09, 0.66, 0.09, "Scene (car frame: the car at the origin, x forward, y left)\n"
          "ego (v, a, δ) · path · line · v_ref(t) · lanes · actors (t, x, y, ψ) · stops · v_max", FILL["tool"])
-    _box(ax, 0.02, row(3) - bh - 0.02, 0.43, bh + 0.02, "Behaviour layer (core/urban/behaviour)\n"
+    _box(ax, 0.02, row(3) - bh - 0.02, 0.43, bh + 0.02, "Behaviour layer (core/urban: sensor,\nconstraints, planner)\n"
          "classify: lead · blocker · crosser · mover\ncandidates: base · pass:<id> · borrow_left\n"
          "rules: stop-sign hold, red-light dilemma\nscore, last choice × 0.9 → the chosen plan", FILL["nmpc"])
     _box(ax, 0.55, row(3) - bh - 0.02, 0.43, bh + 0.02, "UrbanNMPC × 4 (one thread each)\n"
@@ -247,7 +247,7 @@ def fig_tick():
         if k % 2 == 0:
             ax.add_patch(Rectangle((t, 0.2), 0.044 * 1.6, 0.55, fc=FILL["nmpc"], ec=ORANGE, lw=0.8))
     for y, lab in [(2.27, "SimLingo predicts\n(every tick)"), (1.37, "actuation from the plan\n(every tick, 20 Hz)"),
-                   (0.47, "new path + scene + behaviour\nstep (every 2nd tick, 10 Hz)")]:
+                   (0.47, "new path + scene + planner\nstep (every 2nd tick, 10 Hz)")]:
         ax.text(-0.012, y, lab, ha="right", va="center", fontsize=7, color=INK2)
     ax.annotate("", xy=(0.10 + 0.25, 1.05), xytext=(0.10, 1.05), arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.8))
     ax.text(0.10 + 0.125, 0.93, "a sampled 0.25 s ahead, δ 0.15 s ahead (the car's lags)", ha="center", fontsize=6.4,
@@ -436,7 +436,9 @@ def build(out):
         ["Reference", "expert/simlingo_ref.py", "SimLingo's outputs as path points and v_ref(t); odometry between plans"],
         ["World model", "expert/world_model/actors.py, route.py", "visible actors with predictions; lanes, stop lines, route end, lane continuation"],
         ["Frames", "expert/frames.py", "CARLA (left-handed, degrees) to the library's frame; Frame: world to car frame"],
-        ["Behaviour", "core/urban/{include,src}/behaviour", "classification, traffic rules, candidates, parallel solves, choice"],
+        ["Sensor", "core/urban/{include,src}/sensor", "the scene in path coordinates: classification, traffic rules"],
+        ["Constraints", "core/urban/{include,src}/constraints", "candidates: the corridor, gates, leads, movers; the borrow's clear check"],
+        ["Planner", "core/urban/{include,src}/planner", "sensor, then constraints, then parallel solves and the choice"],
         ["NMPC", "core/urban/{include,src}/urban_nmpc", "the optimal control problem, CasADi + FATROP, warm start, set_route"],
         ["Path", "core/urban/.../path", "biarc path through waypoints: projection, pose, curvature"],
         ["Bindings", "bindings/expertctl.cpp", "the Python module expertctl (pybind11, Python 3.8)"],
@@ -449,7 +451,7 @@ def build(out):
     s.append(P("2. One tick", h1))
     s.append(P("The leaderboard ticks CARLA at 20 Hz in synchronous mode and waits for the agent each tick. SimLingo "
                "predicts every tick. Every second tick the agent builds a new path from the latest prediction, reads "
-               "the world model, and runs a behaviour step (10 Hz). Every tick it samples the current plan a little "
+               "the world model, and runs a planner step (10 Hz). Every tick it samples the current plan a little "
                "ahead, for the car's lags, and turns it into throttle, brake and steer."))
     s.append(figure(fig_tick(), 160))
     s.append(P("Figure 2. Timing within a tick and across ticks.", caption))
@@ -462,7 +464,7 @@ def build(out):
         "pose in the new one, so the solver starts warm.",
         "World model: actors detected and tracked (in the world), predicted 5 s ahead, reported in the car's frame; "
         "lanes and stop lines along the path; v_max from the speed limit.",
-        "Scene → Behaviour.step → Decision (the chosen plan, all candidates, notes), then the log row and the live view.",
+        "Scene → Planner.step → Decision (the chosen plan, all candidates, notes), then the log row and the live view.",
     ])
 
     s.append(P("3. Frames: why nothing needs a global position", h1))
@@ -522,7 +524,7 @@ def build(out):
                "and through a circle it has no gradient to go round. The behaviour layer makes those discrete choices "
                "and lets the NMPC solve each one."))
     s.append(figure(fig_behaviour(), 172))
-    s.append(P("Figure 5. One behaviour step.", caption))
+    s.append(P("Figure 5. One planner step.", caption))
     s += bullets([
         "<b>Blocker</b>: a parked car or an object in the lane (reaching blocker_overlap into it), kept until passed: "
         "stopped behind, or gone round in the left lane (borrow_left) when it is within blocker_range and no visible "
@@ -581,9 +583,13 @@ def build(out):
                    [[n, v, c] for n, v, c in struct_fields("core/urban/include/urban/urban_nmpc.hpp", "struct Options {")],
                    [30, 18, 124]))
     s.append(P("The agent sets a_min = −7.0, jit = true, cache_dir = build/urban_cache.", small))
-    s.append(P("Table 5. Behaviour::Options (core/urban/include/urban/behaviour.hpp)", h2))
+    s.append(P("Table 5. Planner::Options: the sensor's, the constraints' and the choice's "
+               "(core/urban/include/urban/{sensor,constraints,planner}.hpp)", h2))
     s.append(table([["Name", "Default", "Meaning"]] +
-                   [[n, v, c] for n, v, c in struct_fields("core/urban/include/urban/behaviour.hpp", "struct Options {")],
+                   [[n, v, c] for path, opening in [("sensor.hpp", "struct Options {"),
+                                                    ("constraints.hpp", "struct Options : Sensor::Options {"),
+                                                    ("planner.hpp", "struct Options : Constraints::Options {")]
+                    for n, v, c in struct_fields("core/urban/include/urban/" + path, opening)],
                    [30, 18, 124]))
     s.append(P("Table 6. The vehicle: config/vehicles/mkz2020.json (derivations: docs/vehicle_parameters.md)", h2))
     s.append(table([["Name", "Value", "Source", "Meaning"]] + vehicle_rows(), [24, 22, 16, 110]))

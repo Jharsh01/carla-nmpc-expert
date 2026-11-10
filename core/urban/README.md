@@ -2,9 +2,12 @@
 
 - `urban_nmpc.hpp`: the NMPC. A kinematic bicycle in the route's path coordinates, and soft constraints for the
   corridor, movers (circles on predicted trajectories), leads, stop/pass gates, grip and headway. CasADi + FATROP.
-- `behaviour.hpp`: classifies actors (lead, blocker, crosser, mover), builds candidate plans (yield or pass each
-  crosser; stay behind a blocker or borrow the left lane), solves them in parallel and picks one. It also holds
-  the traffic-rule state (stop-sign hold, red-light dilemma zone).
+- `sensor.hpp`: the scene (CARLA's privileged information, from `expert/world_model`) in the route's path
+  coordinates: classifies actors (lead, blocker, crosser, mover, oncoming) and holds the traffic-rule state (stop-sign
+  hold, red-light dilemma zone), leaving the stop lines to stop at (`Percept`).
+- `constraints.hpp`: from a `Percept`, the candidate problems for the NMPC (yield or pass each crosser; stay behind a
+  blocker or borrow the left lane): the corridor along the line asked for, gates, leads, movers.
+- `planner.hpp`: the step: sensor, constraints, the candidates solved in parallel and one picked.
 - `path.hpp`: the route as straights and arcs, fitted through waypoints (biarcs), with projection (windowed for
   long routes), pose and curvature at s. Tested by `tests/test_path.cpp`.
 - `vehicle_params.hpp`: the MKZ's parameters the NMPC plans with (`config/vehicles/mkz2020.json`,
@@ -12,7 +15,7 @@
 - `integrate.hpp`: the RK4 step the NMPC discretises its model with.
 - `sim/urban/scenarios.cpp` (`build/urban_scenarios`, a ctest): 11 closed-loop scenarios without CARLA, on a
   kinematic plant with lags on acceleration and steering, each run twice: along the scenario's road, and as
-  `<name>@local` along a SimLingo-like local path rebuilt every plan (`Behaviour::set_route`).
+  `<name>@local` along a SimLingo-like local path rebuilt every plan (`Planner::set_route`).
 - The route can change every plan (`set_route`): SimLingo's path is the route in CARLA. The previous plan is
   carried into the new route's coordinates through the world frame, so the warm start survives.
 

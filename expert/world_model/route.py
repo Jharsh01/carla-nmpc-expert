@@ -150,10 +150,18 @@ class Route:
         wp = self._waypoint(frame.x, frame.y, frame.z)
         if wp is None:
             return None
-        x, y = _xy(wp.transform.location)
         psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
-        if math.cos(_angle(psi - frame.psi)) < 0.0:  # in the oncoming lane: along the way the car goes
-            psi += math.pi
+        if math.cos(_angle(psi - frame.psi)) < 0.0:
+            # In the oncoming lane: the lane beside it that goes the car's way, the one to come back to. Kept to the
+            # oncoming lane, as SimLingo's path stopped leaving it, the car lost the blocker it was going round and
+            # stood in the oncoming flow beside it (Bench2Drive route 4).
+            back = wp.get_left_lane()  # CARLA's left, of the oncoming lane: across the centre line
+            if self._drivable(back) and math.cos(_angle(frames.from_carla_yaw(back.transform.rotation.yaw) - frame.psi)) > 0.0:
+                wp = back
+                psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
+            else:  # no lane our way: along the oncoming one, the way the car goes
+                psi += math.pi
+        x, y = _xy(wp.transform.location)
         ahead = self.continuation(frame, *frame.to_car(x, y), psi - frame.psi)
         c, s = math.cos(psi), math.sin(psi)
         behind = [frame.to_car(x - d * c, y - d * s) for d in np.arange(BEHIND, -0.1, -2.5)]
@@ -162,7 +170,7 @@ class Route:
     # ---- the road along it
 
     def lanes(self, path, frame, window=6):
-        """The lane under the path, its left neighbour and the road's edges, every SPACING metres, merged where nothing
+        """The lane under the path, its neighbours either side (whether there is one, and which way it runs) and the road's edges, every SPACING metres, merged where nothing
         changes; all as offsets across the path (y left). Each edge is taken where the path's normal there crosses it,
         so the lane stays where it is when the path runs at an angle to it (SimLingo's path drifting off the lane, the
         NMPC swerving). Only where the path changes lane (the lane at one point a neighbour of the lane at another,
@@ -178,15 +186,19 @@ class Route:
             band = None if wp is None else across.cut(wp)
             if band is None or wp.is_junction:
                 half = 0.5 * (wp.lane_width if wp is not None else 3.5)
-                rows.append({"lo": -half, "hi": half, "left": 0.0, "oncoming": True, "allowed": False,
+                rows.append({"lo": -half, "hi": half, "against": False, "cuts": [], "left": 0.0, "oncoming": True, "allowed": False,
+                             "right": 0.0, "right_oncoming": False, "right_allowed": False,
                              "road": (-math.inf, math.inf), "lane": None, "neighbours": ()})
                 continue
             left, right = across.neighbour(wp, left=True), across.neighbour(wp, left=False)
-            left_ok = self._drivable(left)
+            left_ok, right_ok = self._drivable(left), self._drivable(right)
             road = [self._road_edge(across, wp, left=False), self._road_edge(across, wp, left=True)]
-            rows.append({"lo": band[0], "hi": band[1], "left": left.lane_width if left_ok else 0.0,
+            rows.append({"lo": band[0], "hi": band[1], "against": across.against(wp), "cuts": self._cuts(across, wp),
+                         "left": left.lane_width if left_ok else 0.0,
                          "oncoming": bool(left_ok and across.against(left)),
-                         "allowed": bool(left_ok), "road": tuple(road), "lane": lane_key(wp),
+                         "allowed": bool(left_ok), "right": right.lane_width if right_ok else 0.0,
+                         "right_oncoming": bool(right_ok and across.against(right)), "right_allowed": bool(right_ok),
+                         "road": tuple(road), "lane": lane_key(wp),
                          "neighbours": tuple(lane_key(n) for n in (left, right) if self._drivable(n))})
         sections = []
         self._ego_lanes = []
@@ -194,22 +206,40 @@ class Route:
         self._body_lanes = {lane_key(wp) for wp in corners if wp is not None and not wp.is_junction}
         for i, row in enumerate(rows):
             lo, hi = row["lo"], row["hi"]
+            # what lies either side is the outermost lane's neighbour on that side: where the band takes in two
+            # lanes, beyond the left one is not what is beside the path's lane (route 1: the lane our way, inside
+            # the band, was taken for the one beyond it, which is oncoming)
+            left_of, right_of = row, row
             used = None if row["lane"] is None else {row["lane"]}
             for other in rows[max(0, i - window): i + window + 1]:  # a lane change: both lanes
                 if other["lane"] is not None and other["lane"] in row["neighbours"]:
+                    if other["hi"] > hi:
+                        left_of = other
+                    if other["lo"] < lo:
+                        right_of = other
                     lo, hi = min(lo, other["lo"]), max(hi, other["hi"])
                     used.add(other["lane"])
             self._ego_lanes.append(used)
+            # Which part of the band runs the car's way (a lane change into the oncoming lane takes that lane in too):
+            # the lanes it takes in, cut here, across the path here. Not the other rows' lo and hi: each is across
+            # the path where that row is, and partway into the oncoming lane our lane's [lo, hi] from a row before
+            # the change lands on the oncoming lane here (route 4, planner_r14).
+            way = [(a, b) for a, b, against, key in row["cuts"] if not against and key in (used or ())]
+            if row["lane"] is None:
+                way = [(lo, hi)]
             road_lo, road_hi = min(row["road"][0], lo), max(row["road"][1], hi)
-            key = (round(lo, 1), round(hi, 1), round(row["left"], 1), row["oncoming"], row["allowed"],
-                   round(road_lo, 1), round(road_hi, 1))
+            way_lo, way_hi = (min(a for a, _ in way), max(b for _, b in way)) if way else (math.inf, -math.inf)
+            key = (round(lo, 1), round(hi, 1), round(left_of["left"], 1), left_of["oncoming"], left_of["allowed"],
+                   round(road_lo, 1), round(road_hi, 1), round(right_of["right"], 1), right_of["right_oncoming"],
+                   right_of["right_allowed"], round(way_lo, 1), round(way_hi, 1))
             if sections and sections[-1][1] == key:
                 sections[-1][0][1] = (i + 1) * SPACING
             else:
                 sections.append(([i * SPACING, (i + 1) * SPACING], key))
         out = [self.ex.LaneSection(s_from=a, s_to=b, lo=lo, hi=hi, left_width=lw, left_oncoming=onc, left_allowed=ok,
-                                   road_lo=rlo, road_hi=rhi)
-               for (a, b), (lo, hi, lw, onc, ok, rlo, rhi) in sections]
+                                   road_lo=rlo, road_hi=rhi, right_width=rw, right_oncoming=ronc, right_allowed=rok,
+                                   way_lo=wlo, way_hi=whi)
+               for (a, b), (lo, hi, lw, onc, ok, rlo, rhi, rw, ronc, rok, wlo, whi) in sections]
         out[-1].s_to = float("inf")
         return out
 
@@ -226,6 +256,22 @@ class Route:
 
     def _drivable(self, wp):
         return wp is not None and wp.lane_type in (self.carla.LaneType.Driving, self.carla.LaneType.Bidirectional)
+
+    def _cuts(self, across, wp):
+        """(lo, hi, runs against the path, lane key) of wp's lane and the driving lanes beside it, across the path."""
+        out = [(*across.cut(wp), across.against(wp), lane_key(wp))]
+        for left in (True, False):
+            cur, seen = wp, {lane_key(wp)}
+            for _ in range(3):
+                cur = across.neighbour(cur, left)
+                if not self._drivable(cur) or lane_key(cur) in seen:
+                    break
+                seen.add(lane_key(cur))
+                band = across.cut(cur)
+                if band is None:
+                    break
+                out.append((*band, across.against(cur), lane_key(cur)))
+        return out
 
     def _road_edge(self, across, wp, left):
         """The offset across the path of the road's edge on one side: the outer edge of the outermost driving lane

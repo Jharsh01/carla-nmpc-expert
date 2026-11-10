@@ -5,12 +5,12 @@
 // so the NMPC drives something it does not model exactly. It solves every 0.1 s and its plan is played at 20 Hz, as
 // in the leaderboard. Other actors follow scripts; the NMPC sees each one from when it becomes visible, predicted at
 // constant velocity (one braking also at constant deceleration, to standstill), as the world model will in CARLA.
-// The behaviour layer (urban/behaviour.hpp) decides what the NMPC is asked to do.
+// The behaviour layer (urban/planner.hpp) decides what the NMPC is asked to do.
 //
 //   build/urban_scenarios [--only NAME] [--out DIR]     exit status 1 if any scenario fails its checks
 //
 // Each scenario also runs as <name>@local: the behaviour layer then plans along a short path rebuilt every plan,
-// as SimLingo's predicted path will be in CARLA (Behaviour::set_route), not along the scenario's road. The path
+// as SimLingo's predicted path will be in CARLA (Planner::set_route), not along the scenario's road. The path
 // starts at the car, joins the lane centre smoothly over 15 m with a different wobble each time, reaches 20 m ahead and
 // goes on along the lane centre for 160 m (the map's lane, past SimLingo's last point). The lanes and stop lines
 // are taken along it from the road, as the world model does from the map.
@@ -31,7 +31,7 @@
 #include <vector>
 
 #include "urban/vehicle_params.hpp"
-#include "urban/behaviour.hpp"
+#include "urban/planner.hpp"
 
 using namespace ex;
 
@@ -203,7 +203,7 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     UrbanNMPC::Options nmpc_options;
     nmpc_options.jit = true;  // compiled once into the cache, loaded after that
     nmpc_options.cache_dir = URBAN_CACHE_DIR;
-    Behaviour behaviour(sc.route, p, body, nmpc_options, Behaviour::Options());
+    Planner planner(sc.route, p, body, nmpc_options, Planner::Options());
     std::mt19937 rng(1);
     std::vector<double> step_times;
     const double L = p.L(), lr = p.b;
@@ -247,9 +247,9 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
                     scene.line_s.push_back(ls);
                     scene.line_e.push_back(0.0);
                 }
-                behaviour.set_route(std::move(local));
+                planner.set_route(std::move(local));
             }
-            const Decision d = behaviour.step(scene);
+            const Decision d = planner.step(scene);
             plan = d.plan;
             t_plan = t;
             solve_ms = 1e3 * d.wall_time;

@@ -74,6 +74,112 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The NMPC and the behaviour layer
 
+- **The behaviour layer is three files (9 November):** `sensor` (the Scene into path coordinates, classification,
+  traffic-rule state: a `Percept`), `constraints` (the candidate Problems from a Percept: corridor, gates, leads,
+  movers, the borrow's clear check) and `behaviour` (the step: those two, the parallel solves, the choice).
+  `Behaviour::Options` inherits `Constraints::Options`, which inherits `Sensor::Options`, so the Python
+  `BehaviourOptions` is unchanged. Older line references to `behaviour.cpp` below predate the split. Checked: all 22
+  offline scenario traces identical to before, timing aside.
+- **Route 1 waited for oncoming traffic in a lane it never needed** (split_r01 and sides_r01: 30.3 % and 31.9 %, then
+  room_r01: 100 % in 20.5 s, 10 Nov). While SimLingo changes into the lane on its left (our way), the band takes in
+  both lanes, but its "left lane" was the neighbour of the lane under the path: the lane inside the band, our way.
+  Going round on the left was then judged against the oncoming lane beyond the band, and it never cleared. Three
+  changes: (1) `route.py` gives each section the lanes on both sides (width, direction, allowed), each taken beyond
+  the band's outermost lane on that side; (2) `constraints` goes round on either side where there is a lane, and a
+  lane our way is judged on traffic beside or behind (`lane_gap` over `merge_time`; traffic ahead is followed), one
+  the other way on oncoming traffic as before; (3) `sensor` takes a parked car that leaves the car room past it
+  within the band ("room beside it") as something to keep clear of, not a blocker. (3) is what fixed route 1: the
+  car never stopped. SimLingo turning back to its old lane (9.3 s in split_r01) followed our stopping the car half
+  way, not the other way round.
+- **Room beside a parked car counts only in lanes running the car's way** (`LaneSection.way_lo/way_hi`, 10 Nov).
+  Where SimLingo's path goes into the oncoming lane the band takes that lane in too; the "room beside it" rule then
+  saw room there, the parked car stopped being a blocker, so there was no borrow and no oncoming check: the NMPC
+  followed SimLingo into the oncoming lane, and an oncoming car in the band was a lead, to stop head-on for (the
+  route 4 crash). Found by reasoning, not seen in a run. The behaviour layer's step is now `Planner`
+  (core/urban/planner), Python `expertctl.Planner` / `PlannerOptions`.
+- **Acceleration limit 0.5 g** (`UrbanNMPC::Options::a_max` 4.905 from 3.0, 10 Nov; g05_r014). The overtake's clear
+  check now judges the pass at the same a_max (`pass_accel`, 1.5, is gone). The NMPC asks for up to 4.9 m/s^2 (3.0
+  before); measured up to 5.6-6.8 against 4.3-4.8. Routes 0 and 1 still 100 %, route 4 28.8 % as before. Offline:
+  no new failures; stops and starts firmer (jerk 11 to 14 m/s^3, against jerk_max 15). The MKZ makes 0.5 g only
+  below about 10 m/s at full throttle (5.4-6.8 m/s^2 to 7.5 m/s, 4.6 at 10, 3.4 at 15, 2.9 at 20;
+  mkz2020_actuation.json): above that the plan asks for more than the car can give, and the clear check judges a
+  faster pass than will be driven. Urban limits here are 8-14 m/s.
+- **The acceleration limit follows the speed** (10 Nov): `VehicleParams` carries the measured full-throttle table
+  (`tables.a_drive_max` in mkz2020.json, docs/vehicle_parameters.md). Each solve bounds a by min(a_max, the table at
+  the speed now), held over the horizon (`UrbanNMPC::a_limit`), from the acceleration the car already has down at the
+  jerk limit: a box bound is hard, and the car was logged at 6.8 m/s^2, so a bound below that at the first step would
+  make the solve infeasible. A constraint a <= table(v) in the problem was the alternative; per solve is simpler and
+  the speed changes little in 0.1 s. The overtake's clear check instead drives the table through the pass
+  (`Constraints::drive`). At urban limits it hardly matters (from rest to 13.9 m/s over 30-80 m, 0.02 s against a
+  constant 4.9); it does on faster roads, where the table falls to 2-3 m/s^2.
+- **Seeing far enough to overtake** (10 Nov). An overtake past a blocker 15-20 m ahead from rest needs 87-117 m of
+  oncoming lane seen clear at 30 km/h, 100-140 m at 50 km/h (the pass, oncoming_gap 20 m, and what an oncoming car at
+  the limit covers meanwhile). The world model reported vehicles to 60 m only, and nothing told "clear" from "not
+  seen". Now: vehicles to 150 m (LOOK_RANGE in the agent); a forward CARLA depth camera (expert/world_model/sight.py,
+  a stand-in for a depth sensor, outside the leaderboard's sensor list, not seen by SimLingo) gives how far along the
+  lane on each side the car sees: the lane's points from the map, 1 m above the road, projected into the frame, seen
+  until one is out of frame or behind something nearer. The scene's sight_left/right is that, capped at LOOK_RANGE;
+  the constraints put an oncoming car at the limit at the edge of sight on an oncoming lane ("blocker: left lane seen
+  only N m ahead, waiting"). The leaderboard's SENSORS track allows only RGB cameras, lidar and radar; a
+  leaderboard-legal version would need depth from RGB (a network) or stereo, both coarse at 100 m.
+- **On Town12 a camera image's own transform is wrong** (sight_r410, 10 Nov): `image.transform` of the depth camera
+  put it at (173, 319) with the car at (1173, 5319), off by 1000 m and about 5000 m, its rotation right. Every lane
+  point then lay about 5000 m ahead: route 4 read 0 m of sight on every plan, route 1 a meaningless 150. The camera is
+  now placed from the car's transform and its mount, in double precision (`sight.world_to_camera_of`). The frames
+  saved then (SIGHT_DEBUG=<dir> dumps a few) give route 4 74-80 m at the start, cut by something solid across the
+  oncoming lane at 70 m.
+- **Six new routes, one run each (results/bench2drive/explore_nov8, 8 Nov, with video):** 2 HazardAtSideLane 100 %,
+  7 ParkingExit 100 %; 4 ConstructionObstacleTwoWays 22.8 %, 6 AccidentTwoWays 36.1 %, 9 OppositeVehicleRunningRedLight
+  46.4 %, 13 NonSignalizedJunctionRightTurn 38.5 %, all four on the watchdog, no collisions.
+- **Parked cars count as oncoming traffic, so `borrow_left` is never clear on two-way roads** (routes 4 and 6). Every
+  opposed track that is not a blocker, crosser or lead goes into `oncoming` (`behaviour.cpp:218`), parked or not. Both
+  routes have a row of parked cars on the far side, 9 of them in the left band (e 2.6-6.0) on every plan of the wait, so
+  "blocker: oncoming traffic, waiting" holds for good (227 and 273 plans). The real flow is not the cause: on route 4
+  no moving oncoming car was within the 60 m seen from 39.4 to 47.5 s, and the car still waited. SimLingo meanwhile
+  wants out (offset 2.4 m, no stop asked on route 4).
+- **Routes 4 and 6 after the parked-car fix (9 Nov, one run each):** plain SimLingo + PID finishes both (100 %, 29.8 s
+  and 23.8 s; results/bench2drive/r46_simlingo_pid), so the NMPC layer is what fails them. The opposite flow
+  (OppositeActorFlow) sends a car every 70-149 m at the limit, under BasicAgents that brake for what is in their lane. What
+  held the car, one cause per run on route 4 (r4_*): (1) it crept out at SimLingo's speed, which slows to a stop while it
+  waits on the same traffic, switching base/borrow_left every plan or two, and the next car stopped nose to nose with it
+  half across (31.9 %; route 6 the same, 36.9 %); (2) the clear check took a 5 m/s pass over the 4 s of the tracks, so
+  a car 60 m off counted as clear; (3) an oncoming car on SimLingo's path (already out in the other lane) is a lead, not
+  oncoming, and was not checked at all: a borrow began with it 50 m off, the car stopped half across and was struck
+  (25.8 %, the only collision); (4) `lane_path` took the oncoming lane as the car's own once it was in it, the blocker
+  went out of its lane and the car lane-kept head-on into the flow (36.4 %); (5) between the cones and the cars parked
+  opposite (2.9 m apart) the circles leave no room: the car's cover 1.23 m against a 0.92 m half-width, a parked car's
+  1.28 against 1.0, plus 0.2 m each, so no plan fits where the car has 0.5 m a side (28.8 %); (6) where SimLingo's path
+  changes lane the band takes in both lanes, and the cars parked opposite became blockers: base waited behind them
+  through clear gaps, and the row made the pass 86 m long, so any oncoming car called it off (27.3 %, 30.3 %); (7) with
+  SimLingo's path already in the left lane at the cones, the lane there has no left, so the pass was never offered
+  (27.3 %). Each is fixed in `behaviour.cpp` / `route.py` (pass_accel, pass_progress, opposed leads in `oncoming`,
+  `lane_path` back to the car's lane, still things as corridor edges in borrow_left, far-side stills never blockers,
+  the left lane looked for back to the car). The last, (8), is open: todo 00.
+- **On a left turn, oncoming through traffic is held as a cut-in lead, not a crosser** (route 9, at rest from 25.8 s,
+  SimLingo asking to go on every plan: 3 m/s more than the plan). The path turns 12 m left; cars coming the other way at
+  e 6.3-6.6 are predicted into it at 3-5 s, and as `crossing_kind` is read at t = 0, when they are opposed, they become
+  leads (144 of 149 plans), one after another from the stream. Plans with no note still kept the car within 0.1 m,
+  alternating with plans that creep 0.7 m: not explained, needs a replay.
+- **Route 13 is held by SimLingo and the behaviour layer together**: SimLingo asks to stop on 142 of the 154 plans of
+  the wait; every plan has the stream (flow 8 m/s, 21-26 m apart) as crossers "to inf", the merge case of todo 0.
+- **The hard stop under 6.5 m/s shows on every route that stops** (todo 2b): a -20 m/s² on routes 1, 4, 6, 9 (min a -19.7
+  to -20.9), each from a_ref near -7.
+- **SimLingo's move round the side-lane hazard waits about 10 s in lane** (route 2, still 100 %): SimLingo's line is 3 m
+  left from 12.95 s, the car stays within 0.3 m of its lane to 19 s, stops twice and creeps at 1.5 m/s heading 8 deg the
+  other way, and is across only by 24.5 s. No blocker or borrow candidate: todo 10's held-back overtake.
+- **Route 1's swing at the end starts with a stop beside the parked car** (results/bench2drive/repro_r1_video, 8 Nov, 100 %
+  but visibly weaving from about 19 s; the same weave in nokink_hold and repro_r1, so all three runs). At 10.95 s SimLingo
+  turns back to the route lane level with the parked car 3697 (its rear 2.6 m ahead of the car's centre). In the new lane 3697
+  is a blocker; `borrow_left` is refused ("oncoming traffic, waiting"), so `base` keeps `stay_behind`'s lead at
+  `s_lo - 4` m, 1.4 m behind the car's own front: a gap already broken, so a_ref -7 and a stop in 0.2 s (a -20 m/s², todo 2b)
+  in the passing lane at 11.55 s. Stopped there, SimLingo's next predictions keep the passing lane, and it stays in it to
+  y 5196, 40 m from the route's end (the target point: route 1 is 134 m, under the leaderboard's 200 m downsampling, so
+  its only target is the end). The late return is then a closed loop between SimLingo and the NMPC: SimLingo's line goes
+  3 m across in 10 m, the NMPC follows it to 10-13 deg of heading, and the next prediction, made at that heading, picks
+  the other lane (seen in all three runs: back to the passing lane at 77-80 deg, to the route lane at 93-95). Plain
+  SimLingo + PID (results/bench2drive/r1_simlingo_pid, same day) has no stop and no weave: it waits behind 3697, dodges
+  round it and is back in the route lane by y 5226, heading under 1.1 deg after. Not a frame error: the lane-keeping line
+  lands within 0.3 m of the lane, and 0.3 s of latency at these yaw rates moves a point 10 m ahead about 0.35 m.
 - **Keeping SimLingo's line where it is and not driving failed plans finishes route 1** (`path_points`, `expert/plan_hold.py`, candidates ranked solved first; results/bench2drive/nokink_hold, one run each at 2 Hz, 2 Nov). Route 1: 100 % for the
   first time, 21.85 s, no infractions, no stop after the start, largest heading 14.9 deg, in the left lane by about 8 s, past the parked car, and on in lane keeping at 8 m/s. Failed plans 13 of 231 to 3 of 109; while moving in a manoeuvre 8 of 21 to 2 of 48;
   median distance of the plan from the line 1.22 to 0.72 m. Route 0: 100 %. Route 8: 41.0 % (43.3), 2 m less, held by crossers as before; it now stays in a manoeuvre on 197 plans against 42. Route 10: 30.4 % (35.5), but it had no manoeuvre plans and

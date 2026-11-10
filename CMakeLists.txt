@@ -59,7 +59,9 @@ add_library(urban STATIC
     core/urban/src/path.cpp
     core/urban/src/vehicle_params.cpp
     core/urban/src/urban_nmpc.cpp
-    core/urban/src/behaviour.cpp)
+    core/urban/src/sensor.cpp
+    core/urban/src/constraints.cpp
+    core/urban/src/planner.cpp)
 target_include_directories(urban PUBLIC ${CMAKE_SOURCE_DIR}/core/urban/include)
 target_link_libraries(urban PUBLIC Eigen3::Eigen Threads::Threads PRIVATE casadi::casadi nlohmann_json::nlohmann_json)
 

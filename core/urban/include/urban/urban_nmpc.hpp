@@ -135,7 +135,9 @@ public:
         double a_ref = 2.0;  // [m/s^2]
         // and in bends to the speed that takes them at this lateral acceleration (grip allows more, comfort less)
         double a_lat_ref = 3.0;  // [m/s^2]
-        double a_max = 3.0;  // [m/s^2]
+        // The strongest acceleration, 0.5 g [m/s^2]; less where the vehicle cannot give it at the speed (its
+        // a_drive_max table), taken at the speed at the start of each solve and held over the horizon
+        double a_max = 0.5 * 9.81;
         // The strongest braking [m/s^2]; NaN: min(F_brake_max / m, mu g). The MKZ brakes at about 7.7 m/s^2 on dry
         // asphalt (docs/vehicle_parameters.md); this keeps a margin below it.
         double a_min = -7.0;
@@ -184,6 +186,8 @@ public:
     static const std::vector<std::string>& groups();
 
     Path route;  // set_route() changes it
+    // The strongest acceleration the last solve allowed: min(opt.a_max, the vehicle's a_drive_max at the speed) [m/s^2]
+    double a_limit = NAN;
     const VehicleParams p;
     const Body body;
     const Options opt;

@@ -146,7 +146,7 @@ for i in "${ids[@]}"; do
         finished "$res" && break
         echo "== $name (attempt $t/$tries)  $(date +%H:%M:%S)"
         rm -f "$res"
-        SAVE_PATH=$out_root/viz/ ROUTES=$route timeout 3600 "$VPY" -u \
+        SAVE_PATH=$out_root/viz/ ROUTES=$route timeout 600  "$VPY" -u \
             "$REPO/scripts/b2d_evaluator.py" \
             --routes="$route" --repetitions=1 --track=SENSORS --checkpoint="$res" --timeout=600 \
             --agent="$AGENT_FILE" --agent-config="$AGENT_CONFIG" \

@@ -16,6 +16,12 @@ struct VehicleParams {
     double delta_max = 0.95;  // road-wheel angle limit [rad]
     double delta_rate_max = 0.6;  // steering rate limit [rad/s]
     double g = 9.81;  // [m/s^2]
+    // The strongest drive acceleration against speed (full throttle, measured): linear between the speeds, held
+    // beyond them. The file's "tables": {"a_drive_max": {"speed": [...], "value": [...]}}.
+    std::vector<double> a_drive_speed = {0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5, 25.0};  // [m/s]
+    std::vector<double> a_drive_max = {5.427, 6.291, 6.8, 5.173, 4.6, 3.831, 3.431, 2.957, 2.902, 2.629, 2.102};  // [m/s^2]
+
+    double a_drive(double v) const;  // the table at speed v [m/s^2]
 
     // Read from a JSON file of the form {"vehicle": {"parameters": {"m": {"value": ...}, ...}}}; every field above
     // must be present.

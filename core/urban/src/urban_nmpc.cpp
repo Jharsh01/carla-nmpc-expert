@@ -499,7 +499,14 @@ Plan UrbanNMPC::solve(const Problem& pr) {
         for (double v : *values) par.push_back(std::isfinite(v) ? 1.0 : 0.0);
     }
 
-    casadi::DMDict args = {{"p", par}, {"lbx", m.lbw}, {"ubx", m.ubw}, {"lbg", m.lbg}, {"ubg", m.ubg}, {"x0", m.w0}};
+    // The strongest acceleration for this solve: a_max (0.5 g), or less where the engine cannot give it at the speed
+    // now (the vehicle's a_drive_max), held over the horizon: the speed changes little between solves, 0.1 s apart.
+    // Above an acceleration the car already has, it comes down at the jerk limit, so the bound is never one the
+    // first steps cannot meet.
+    a_limit = std::min(opt.a_max, p.a_drive(std::max(0.0, z0[IV])));
+    std::vector<double> ubw = m.ubw;
+    for (int k = 1; k <= N; ++k) ubw[m.x_at(k) + IA] = std::max(a_limit, z0[IA] - opt.jerk_max * times[k]);
+    casadi::DMDict args = {{"p", par}, {"lbx", m.lbw}, {"ubx", ubw}, {"lbg", m.lbg}, {"ubg", m.ubg}, {"x0", m.w0}};
     const auto start = std::chrono::steady_clock::now();
     const casadi::DMDict sol = m.solver(args);
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();

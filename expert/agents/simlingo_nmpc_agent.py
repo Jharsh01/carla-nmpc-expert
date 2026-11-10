@@ -16,7 +16,7 @@ camera). SimLingo's model runs in its own process on its own CPUs (expert/simlin
 SIMLINGO_EVERY ticks (1 Hz) that tick's camera is sent to it, and its prediction is taken SIMLINGO_LATENCY ticks
 later, as a car would get it, so the simulation goes on while it thinks; in between, the last prediction is held,
 its path carried into the car's frame now by odometry and its speeds taken from the prediction's age on. Every
-PLAN_EVERY ticks a new path, the scene and a behaviour step (core/urban), the step solved on the NMPC's own CPUs and
+PLAN_EVERY ticks a new path, the scene and a planner step (core/urban), the step solved on the NMPC's own CPUs and
 its plan taken NMPC_LATENCY ticks later. SimLingo's path is planned along only while it is a manoeuvre, a lane change
 or a turn (it leaves the lane the car is in: expertctl.PathIntent); otherwise the NMPC keeps to the lane's centre, and
 SimLingo's speeds count only when they ask to stop. A plan that fails to solve is never driven (expert/plan_hold.py). Then the plan sampled a little ahead (by the actuation's lags) for the
@@ -53,12 +53,14 @@ from expert import cpus, frames, live_view, simlingo_ref, timing  # noqa: E402
 from expert.mkz_actuation import MKZActuation, rate_limited  # noqa: E402
 from expert.plan_hold import PlanHold  # noqa: E402
 from expert.world_model.actors import Actors  # noqa: E402
-from expert.world_model.route import Route  # noqa: E402
+from expert.world_model.route import Route
+from expert.world_model.sight import Sight  # noqa: E402
 
 DT = 0.05  # [s] a tick
 PLAN_EVERY = 4  # ticks between plans (5 Hz)
 NMPC_LATENCY = 1  # ticks from a plan's scene to its use: the NMPC has 50 ms, as it would in a car
 SIMLINGO_EVERY = 10  # ticks between SimLingo's predictions (2 Hz)
+LOOK_RANGE = 150.0  # [m] the world model reports vehicles this far off (and in line of sight)
 SIMLINGO_LATENCY = 6  # ticks from SimLingo's camera frame to its prediction's use: on its own core of an L4
                       # machine it takes 290 ms (60 preprocessing, 230 the model), so 300 ms would hold in real time
 METRIC_EVERY = 200  # ticks between writes of SimLingo's metric_info.json (and at the end)
@@ -131,7 +133,7 @@ class _Worker:
 
 
 class _Job:
-    """A behaviour step being solved on the NMPC's thread, with the scene it was made from (for the log)."""
+    """A planner step being solved on the NMPC's thread, with the scene it was made from (for the log)."""
 
     def __init__(self, future, tick, t, scene, path, s_now, s_simlingo, frame, route, intent):
         self.future, self.tick, self.t = future, tick, t
@@ -239,7 +241,9 @@ class SimLingoNMPCAgent(LingoAgent):
         carla_map = world.get_map()
         end = self._global_plan_world_coord[-1][0].location
         self.route = Route(expertctl, carla, world, carla_map, frames.from_carla_xy(end.x, end.y))
-        self.actors = Actors(expertctl, carla, world, carla_map, self.hero)
+        # vehicles reported to LOOK_RANGE: an overtake at 50 km/h needs 100-140 m of oncoming lane seen clear
+        self.actors = Actors(expertctl, carla, world, carla_map, self.hero, look_range=LOOK_RANGE)
+        self.sight = Sight(carla, world, carla_map, self.hero)
         self.params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
         self.body = expertctl.Body(length=4.89, width=1.84 + 0.2, cg_to_center=0.31)  # mirrors on the width
         self.nmpc_options = expertctl.UrbanOptions()
@@ -250,7 +254,7 @@ class SimLingoNMPCAgent(LingoAgent):
         self.nmpc_options.jit = True
         self.nmpc_options.cache_dir = os.path.join(REPO, "build", "urban_cache")
         os.makedirs(self.nmpc_options.cache_dir, exist_ok=True)
-        self.behaviour = None  # made with the first path
+        self.planner = None  # made with the first path
         self.actuation = MKZActuation(os.path.join(REPO, "config", "vehicles", "mkz2020_actuation.json"), dt=DT)
         self.odometry = simlingo_ref.Odometry()
         self.ticks = 0
@@ -309,12 +313,12 @@ class SimLingoNMPCAgent(LingoAgent):
                 frame = frames.Frame.of(self.hero.get_transform())  # the world model's, to report in the car's frame
                 path, s_simlingo = self._path(route, frame, ego)
             with timing.stage("nmpc.set_route"):  # the first: the solver's set-up (and compile, on a fresh cache)
-                if self.behaviour is None:
-                    self.behaviour = expertctl.Behaviour(path, self.params, self.body, self.nmpc_options,
-                                                         expertctl.BehaviourOptions())
+                if self.planner is None:
+                    self.planner = expertctl.Planner(path, self.params, self.body, self.nmpc_options,
+                                                     expertctl.PlannerOptions())
                     self.odometry.old_frame()
                 else:
-                    self.behaviour.set_route(path, expertctl.Pose(*self.odometry.old_frame()))
+                    self.planner.set_route(path, expertctl.Pose(*self.odometry.old_frame()))
             s_now = path.project(ego.x, ego.y)[0]
             with timing.stage("nmpc.detect"):
                 self.actors.detect(t)
@@ -333,7 +337,12 @@ class SimLingoNMPCAgent(LingoAgent):
                 scene.actors = self.actors.scene_actors(t, frame, lambda x, y: self.route.ego_lanes(path, x, y))
             with timing.stage("nmpc.stops"):
                 scene.stops = self.route.stops(path, s_now, frame)
-            self.job = _Job(self.nmpc_thread.submit(self.behaviour.step, scene), self.ticks, t, scene, path, s_now,
+            with timing.stage("nmpc.sight"):  # as far as the depth camera sees, and no further than cars are reported
+                sides = self.sight.sides()
+                for name in ("left", "right"):
+                    seen = sides[name]
+                    setattr(scene, "sight_" + name, math.inf if seen is None else min(seen[0], LOOK_RANGE))
+            self.job = _Job(self.nmpc_thread.submit(self.planner.step, scene), self.ticks, t, scene, path, s_now,
                             s_simlingo, frame, route, [self.intent.manoeuvre, round(self.intent.offset, 3), stop])
         job = None
         if self.job is not None and (self.plan is None or self.ticks - self.job.tick >= NMPC_LATENCY):
@@ -372,6 +381,10 @@ class SimLingoNMPCAgent(LingoAgent):
             row["pose"] = [round(true.x, 3), round(true.y, 3), round(true.psi, 5)]  # for the video and analysis only
             row["held"] = [self.held_step, *(round(v, 3) for v in self.held_odometry.pose())]
             if job:  # a new plan: the scene it was made from, at its time (t_plan)
+                # each candidate: label, solved, largest slack but the headway's, how far it gets [m], score
+                row["candidates"] = [[c.label, bool(c.plan.success), round(float(max(c.plan.slack_max[:-1])), 3),
+                                      round(float(c.plan.x[-1][0] - c.plan.x[0][0]), 1), round(float(c.score), 1)]
+                                     for c in self.decision.candidates]
                 row.update(self._describe(job.scene, job.path, job.s_now, job.s_simlingo))
                 row.update(self._geometry(job))
             self.log_file.write(json.dumps(row) + "\n")
@@ -392,9 +405,12 @@ class SimLingoNMPCAgent(LingoAgent):
         plan = self.decision.plan  # the one just solved, on this path, though it may not be the one driven
         early = np.asarray(plan.times) <= 2.0
         dv = float(np.interp(1.0, plan.times, plan.x[:, 3])) - float(np.interp(1.0, scene.v_ref_t, scene.v_ref)) if scene.v_ref else 0.0
-        return {"scene": {"actors": actors, "lane": [round(lane.lo, 2), round(lane.hi, 2), round(lane.left_width, 2)],
+        return {"scene": {"actors": actors, "lane": [round(lane.lo, 2), round(lane.hi, 2), round(lane.left_width, 2), round(lane.right_width, 2),
+                                   bool(lane.left_oncoming), bool(lane.right_oncoming),
+                                   round(max(lane.lo, lane.way_lo), 2), round(min(lane.hi, lane.way_hi), 2)],
                           "stops": [[str(st.kind).split(".")[-1], round(st.s - s_now, 1)] for st in scene.stops],
-                          "simlingo_reach": round(s_simlingo - s_now, 1)},
+                          "simlingo_reach": round(s_simlingo - s_now, 1),
+                          "sight": [round(v, 1) if math.isfinite(v) else None for v in (scene.sight_left, scene.sight_right)]},
                 "override": [round(float(np.max(np.abs(plan.x[early, 1]))), 3), round(dv, 3)]}
 
     def _geometry(self, job):
@@ -420,6 +436,9 @@ class SimLingoNMPCAgent(LingoAgent):
             json.dump(self.metric_info, f, indent=4)
 
     def destroy(self, results=None):
+        if getattr(self, "sight", None) is not None:
+            self.sight.destroy()
+            self.sight = None
         if getattr(self, "metric_info", None):
             self._write_metric_info()
         if self.log_file is not None:

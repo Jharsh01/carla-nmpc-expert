@@ -56,6 +56,40 @@
         "source": "constant",
         "description": "gravity"
       }
+    },
+    "tables": {
+      "a_drive_max": {
+        "speed": [
+          0.0,
+          2.5,
+          5.0,
+          7.5,
+          10.0,
+          12.5,
+          15.0,
+          17.5,
+          20.0,
+          22.5,
+          25.0
+        ],
+        "value": [
+          5.427,
+          6.291,
+          6.8,
+          5.173,
+          4.6,
+          3.831,
+          3.431,
+          2.957,
+          2.902,
+          2.629,
+          2.102
+        ],
+        "unit": "m/s^2 at m/s",
+        "source": "derived",
+        "description": "strongest drive acceleration at each speed, on level ground",
+        "note": "full throttle, from mkz2020_actuation.json (scripts/identify_ego.py); linear between the speeds, held beyond them. The NMPC asks for at most min(this, UrbanNMPC::Options::a_max = 0.5 g): 0.5 g is out of reach above about 10 m/s, where the car is power-limited"
+      }
     }
   }
 }
