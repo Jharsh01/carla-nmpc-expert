@@ -209,8 +209,33 @@ def test_path_intent_is_measured_from_the_lane_with_hysteresis():
     assert not intent.update(s, [0.0, 0.0, 0.1, 0.2, 0.3])
 
 
+def test_path_intent_asks_to_change_lane_to_a_side_before_it_is_a_manoeuvre():
+    intent = expertctl.PathIntent()
+    s = [0.0, 4.0, 8.0, 12.0, 18.0]
+    intent.update(s, [0.0, 0.0, 0.1, 0.2, 0.3])  # keeping the lane
+    assert intent.asks() == 0
+    assert not intent.update(s, [0.0, 0.1, 0.2, 0.5, 0.7])  # leaning left: asks, not yet a manoeuvre
+    assert intent.asks() == 1 and intent.side == 1
+    intent.update(s, [0.0, -0.1, -0.3, -1.5, -2.8])  # to the right
+    assert intent.asks() == -1
+    scene = expertctl.Scene()
+    scene.asks_change = intent.asks()
+    assert scene.asks_change == -1
+
+
 def test_asks_to_stop():
     t = [0.1, 0.6, 1.1, 1.6, 2.6]
     assert not simlingo_ref.asks_to_stop(t, [0.4, 3.0, 4.0, 4.0, 0.0])  # moving off; a stop past the window
     assert simlingo_ref.asks_to_stop(t, [6.0, 4.0, 2.0, 0.5, 0.0])
 
+
+
+def test_odometry_ignores_a_nan_compass():
+    """CARLA's compass reads NaN now and then: that tick turns nothing, and the pose stays finite."""
+    odo = simlingo_ref.Odometry()
+    odo.update(5.0, 0.3, 0.05)
+    odo.update(5.0, float("nan"), 0.05)
+    odo.update(5.0, 0.3, 0.05)
+    x, y, psi = odo.pose()
+    assert all(math.isfinite(v) for v in (x, y, psi))
+    assert abs(psi) < 1e-12 and abs(x - 0.75) < 1e-9 and abs(y) < 1e-9

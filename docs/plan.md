@@ -21,7 +21,7 @@ the NMPC's overrides of SimLingo's reference are logged and counted.
 
 ---
 
-## 1. The world model (`expert/world_model/`, built)
+## 1. The middle layer: perception (`middle_layer/`, built)
 
 | Scene field | CARLA source (privileged) | What would estimate it | Realism filter |
 |---|---|---|---|
@@ -36,12 +36,12 @@ Prediction: vehicles along their lane (map), everything else at constant velocit
 hypotheses, emergency vehicles, and a noise/degradation config (position σ, velocity σ, drop rate, latency) for
 ablations.
 
-## 2. The urban NMPC and the behaviour layer (`core/urban/`, built)
+## 2. The NMPC and its planner (`nmpc/`, built)
 
 A kinematic bicycle in the route's path coordinates, with soft constraints for the corridor, movers, leads,
 stop/pass gates, grip and headway (CasADi + FATROP). The behaviour layer classifies actors, builds 1–3 candidate
 plans (yield or pass each crosser; stay behind or borrow the left lane), solves them in parallel and picks one. It
-also holds the traffic-rule state. The design reasons are in `core/urban/README.md`; 11 offline scenarios
+also holds the traffic-rule state. The design reasons are in `nmpc/README.md`; 11 offline scenarios
 (`build/urban_scenarios`) cover it without CARLA.
 
 Still to do: a fallback for a late or failed solve (follow the last plan, then brake at the friction limit);
@@ -63,7 +63,7 @@ start new candidates from the chosen plan to cut cold-start solve times.
   (`frames.Frame`, from the car's true pose: the stand-in for sensors on the car). An earlier version placed the
   path in the world by SimLingo's own GNSS/UKF pose; on Town12 that was 497.6 m off CARLA's frame, since SimLingo
   estimates its GNSS reference itself.
-- Past SimLingo's last point the path goes on along the lane that point is in, for 160 m (`world_model/route.py`):
+- Past SimLingo's last point the path goes on along the lane that point is in, for 160 m (`middle_layer/perception/sensors/map.py`):
   the behaviour layer looks for actors and stops that far, and on a straight continuation a bend's lane, a lead in
   the bend and the bend's speed are all wrong (`curve@local` drifted 0.54 m that way). Only SimLingo's part is
   asked to be followed.

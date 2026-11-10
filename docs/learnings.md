@@ -74,6 +74,14 @@ whenever a run, a test or a dead end teaches something not obvious from the code
 
 ## The NMPC and the behaviour layer
 
+- **Two layers since 10 Nov: `nmpc/` and `middle_layer/`** (core/urban and expert/world_model are gone). The middle
+  layer is perception: sensors in Python (actors.py, map.py, was route.py, sight.py) and their post-processing in
+  C++ (tracks, classify, lanes, left_dir, right_dir). The NMPC: framework.cpp (the optimisation), cost.cpp,
+  planner.cpp, and src/constraint/ with each manoeuvre's rule and its rows side by side (lane, movers, follow, stop,
+  crossing, overtake, turn, grip; candidates.cpp builds the candidates). Stop lines and the traffic rules' state
+  moved from perception to constraint/stop. Every tunable is in nmpc/include/nmpc/shared_param.hpp. Python names are
+  unchanged (expertctl.Planner, PlannerOptions, UrbanNMPC). Checked: all 22 offline traces identical. Line
+  references to behaviour.cpp, sensor.cpp or constraints.cpp below predate the move.
 - **The behaviour layer is three files (9 November):** `sensor` (the Scene into path coordinates, classification,
   traffic-rule state: a `Percept`), `constraints` (the candidate Problems from a Percept: corridor, gates, leads,
   movers, the borrow's clear check) and `behaviour` (the step: those two, the parallel solves, the choice).
@@ -386,3 +394,37 @@ whenever a run, a test or a dead end teaches something not obvious from the code
   known. A count of passes on repeats says little, so vary something that matters, not just `--seed`.
 - **The last field of an actor in `nmpc.jsonl`'s scene is metres predicted over 5 s, not a speed** (`simlingo_nmpc_agent.py:383`).
   Divide by 5 for m/s: 65 is 13 m/s. Read as km/h it misled the analysis of routes 0, 1, 8 and 10.
+- **The move to `nmpc/` and `middle_layer/` changed no behaviour** (10 Nov, checked on the uncommitted rework): routes 0 and 1
+  (`--no-cot --fast`, seed 1, one try each) both scored 100 with route 100 % and penalty 1.00, at 0.30x real time
+  (`results/bench2drive/rework-check`). `urban_scenarios` matches HEAD (5e09e77) exactly, including its four failures:
+  `parked_car_overtake` (solve time p95; `@local` off the road at t = 4.65 s) and `parked_car_wait` (both variants stall at
+  s = 43.9 m). These fail before the rework too, so `ctest` is red without a regression.
+- **SimLingo asking to go round decides the overtake at once** (10 Nov; `Scene::asks_change`, `PathIntent::asks`,
+  `Constraints::build`, `Planner::step`). SimLingo's line more than 0.6 m off the lane (`PathIntent::ask`) with a
+  blocker in range: the borrow on that side is driven now if the clear check passes (`Result::go`), else the car stops
+  where it is (`view_stop_decel` 3 m/s² after `view_stop_delay` 0.5 s) and holds there while the blocker is in range, to
+  see past it and have room to pull out. Offline (`asked_overtake_stop`) it stops 30 m back and goes once the oncoming car
+  is past; `parked_car_wait` without the ask still stalls (the wait point at b_lo - 4 m is too close to pull out: the
+  blocker's edge starts 5 m before it, so `borrow_left` needs slack 1.7). Without the delay a stop judged at 3 m/s² from
+  the first instant asked for 6, which the MKZ's brake under 6.5 m/s turned into 20 (todo 2b).
+- **CARLA's compass reads NaN now and then.** `Odometry.update` took it as is, carried SimLingo's held path to NaN, and
+  `map.get_waypoint` on it raised "distance > 0.0", crashing the agent (route 4). Now a NaN reading turns nothing.
+- **A measured acceleration outside [a_min, a_max] makes every plan infeasible**, so the agent clamps it before the NMPC
+  (after the 20 m/s² brake, route 4 failed every plan at rest).
+- **Where SimLingo's path changes into an oncoming lane, `overtake()` offered no way round** (route 4): the band takes
+  both lanes in, so no lane lies beyond it, `overtake` returned before its clear check, and nothing ever judged the
+  oncoming traffic. The oncoming part of the band now counts as the lane to go into (`min_borrow_width` 2.5 m).
+- **Route 4 with all of the above (one run): 19.7 %, at rest 30 s.** Asked at 7.0 s with the cones 20.6 m ahead, the car
+  stopped there and waited: 136 plans "oncoming traffic", 15 "left lane seen only 70 m". The flow comes at 8 m/s, a car
+  every 65-100 m; sight past the cones swings 8-70 m as the oncoming cars hide it. From rest 20 m back the pass is long
+  enough that no gap passed with `oncoming_gap` 20 m and an unseen car assumed at the limit at the edge of sight.
+  Stopping further back did not buy sight here (it is capped by the oncoming cars and the 70 m reach), but did lengthen
+  the pass. Plain SimLingo finishes route 4.
+- **Braking limit -4.6 m/s²** (`NmpcOptions::a_min`, and the agent; 10 Nov, from -7). `dilemma_decel` follows it to 4.6.
+  Offline the solves got faster (`parked_car_overtake` p95 56 -> 42-46 ms, now within 50), but `pedestrian_behind_van`
+  can no longer stop in a straight line: a pedestrian stepping out 17 m ahead at 10.9 m/s needs about 5 m/s² with the
+  lag. The plan swerves left and stops 0.19 m short (0.94 m at -7). It then sat at rest for good: at rest, angled
+  (e 0.57, heading 0.08), its front corner was 0.12 m past the corridor, so the plan's first step broke it and standing
+  still was cheapest. At rest the corridor round the car now takes in its corners at its heading and the edge margin
+  (`lane_corridor`); in motion that widening, redone each plan round where the car had got to, carried the swerve off
+  the road, so it is at rest only. Routes 0 and 1 at -4.6: 100 each (one run).

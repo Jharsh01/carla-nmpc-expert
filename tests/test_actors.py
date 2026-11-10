@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from expert import frames
-from expert.world_model.actors import Actors, Track
+from middle_layer.perception.sensors.actors import Actors, Track
 
 expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 

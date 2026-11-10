@@ -77,8 +77,12 @@ class Odometry:
         self.heading = None  # the compass's last reading [rad, CARLA's: clockwise]
 
     def update(self, speed, compass, dt):
-        """One tick: dt seconds at `speed`, the compass now reading `compass`."""
-        turn = 0.0 if self.heading is None else -math.remainder(compass - self.heading, 2.0 * math.pi)
+        """One tick: dt seconds at `speed`, the compass now reading `compass`. CARLA's compass reads NaN now and then
+        (SimLingo's transfuser_utils guards it as a simulation bug): that tick turns nothing, the last reading kept.
+        Unguarded, route 4 carried SimLingo's path to NaN and the map lookup on it crashed the agent."""
+        if not math.isfinite(compass):
+            compass = self.heading
+        turn = 0.0 if self.heading is None or compass is None else -math.remainder(compass - self.heading, 2.0 * math.pi)
         self.heading = compass
         mid = self.psi + 0.5 * turn
         self.x += speed * dt * math.cos(mid)

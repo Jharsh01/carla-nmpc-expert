@@ -1,6 +1,6 @@
 """SimLingo driving through the urban NMPC, as a leaderboard agent: SimLingo's predicted path is the route the NMPC
 plans along and its speed waypoints the speed asked for, in place of its PID (LingoAgent.control_pid). The world
-model (expert/world_model) adds, as constraints, what the car must keep clear of and the rules it must keep: the
+model (middle_layer/perception/sensors) adds, as constraints, what the car must keep clear of and the rules it must keep: the
 visible actors, the lanes, the lights and signs.
 
     scripts/run_bench2drive.sh --agent simlingo_nmpc --routes 0-9 [--no-cot] [--fast]
@@ -16,7 +16,7 @@ camera). SimLingo's model runs in its own process on its own CPUs (expert/simlin
 SIMLINGO_EVERY ticks (1 Hz) that tick's camera is sent to it, and its prediction is taken SIMLINGO_LATENCY ticks
 later, as a car would get it, so the simulation goes on while it thinks; in between, the last prediction is held,
 its path carried into the car's frame now by odometry and its speeds taken from the prediction's age on. Every
-PLAN_EVERY ticks a new path, the scene and a planner step (core/urban), the step solved on the NMPC's own CPUs and
+PLAN_EVERY ticks a new path, the scene and a planner step (nmpc/), the step solved on the NMPC's own CPUs and
 its plan taken NMPC_LATENCY ticks later. SimLingo's path is planned along only while it is a manoeuvre, a lane change
 or a turn (it leaves the lane the car is in: expertctl.PathIntent); otherwise the NMPC keeps to the lane's centre, and
 SimLingo's speeds count only when they ask to stop. A plan that fails to solve is never driven (expert/plan_hold.py). Then the plan sampled a little ahead (by the actuation's lags) for the
@@ -52,9 +52,9 @@ import expertctl  # noqa: E402
 from expert import cpus, frames, live_view, simlingo_ref, timing  # noqa: E402
 from expert.mkz_actuation import MKZActuation, rate_limited  # noqa: E402
 from expert.plan_hold import PlanHold  # noqa: E402
-from expert.world_model.actors import Actors  # noqa: E402
-from expert.world_model.route import Route
-from expert.world_model.sight import Sight  # noqa: E402
+from middle_layer.perception.sensors.actors import Actors  # noqa: E402
+from middle_layer.perception.sensors.map import Route  # noqa: E402
+from middle_layer.perception.sensors.sight import Sight  # noqa: E402
 
 DT = 0.05  # [s] a tick
 PLAN_EVERY = 4  # ticks between plans (5 Hz)
@@ -139,7 +139,7 @@ class _Job:
         self.future, self.tick, self.t = future, tick, t
         self.scene, self.path, self.s_now, self.s_simlingo = scene, path, s_now, s_simlingo
         self.frame, self.route = frame, route  # the car's true pose then; SimLingo's path carried to it (y right)
-        self.intent = intent  # for the log: [a manoeuvre, SimLingo's offset from the lane, it asks to stop]
+        self.intent = intent  # for the log: [a manoeuvre, SimLingo's offset from the lane (+ left), it asks to stop]
 
 
 class SimLingoNMPCAgent(LingoAgent):
@@ -247,7 +247,7 @@ class SimLingoNMPCAgent(LingoAgent):
         self.params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
         self.body = expertctl.Body(length=4.89, width=1.84 + 0.2, cg_to_center=0.31)  # mirrors on the width
         self.nmpc_options = expertctl.UrbanOptions()
-        self.nmpc_options.a_min = -7.0
+        self.nmpc_options.a_min = -4.6  # the braking limit
         # 2 s ahead in 25 steps: 20 of 50 ms over the first second (a tick each), 5 of 200 ms over the second
         self.nmpc_options.horizon, self.nmpc_options.fine = 2.0, 1.0
         self.nmpc_options.h_fine, self.nmpc_options.h = 0.05, 0.2
@@ -304,7 +304,10 @@ class SimLingoNMPCAgent(LingoAgent):
         self.odometry.update(speed, float(imu[-1]), DT)
         self.a_filtered += 0.3 * (float(imu[0]) - self.a_filtered)
         delta = self.actuation.delta_of(self.steer, speed)
-        ego = expertctl.Ego(x=COM_AHEAD, y=0.0, psi=0.0, v=speed, a=self.a_filtered, delta=delta)  # in its own frame
+        # the acceleration within the model's bounds: the MKZ's brake under 6.5 m/s reaches 20 m/s^2 (todo 2b), a
+        # start no plan can be made from (route 4: every plan failed at rest after a stop)
+        a_now = min(max(self.a_filtered, self.nmpc_options.a_min), self.nmpc_options.a_max)
+        ego = expertctl.Ego(x=COM_AHEAD, y=0.0, psi=0.0, v=speed, a=a_now, delta=delta)  # in its own frame
 
         submitted = self.job is None and (self.plan is None or self.ticks % PLAN_EVERY == 0)
         timing.flag("planned", submitted)
@@ -331,6 +334,7 @@ class SimLingoNMPCAgent(LingoAgent):
             if not self.intent.manoeuvre and not stop:  # the limit, for the actors and the rules to bring down
                 scene.v_ref_t, scene.v_ref = [], []
             scene.line_s, scene.line_e = [0.0, path.length], [0.0, 0.0]  # SimLingo's path itself
+            scene.asks_change = self.intent.asks()  # the side its line leaves the lane to, for a blocker ahead
             with timing.stage("nmpc.lanes"):
                 scene.lanes = self.route.lanes(path, frame)
             with timing.stage("nmpc.scene_actors"):
@@ -343,7 +347,7 @@ class SimLingoNMPCAgent(LingoAgent):
                     seen = sides[name]
                     setattr(scene, "sight_" + name, math.inf if seen is None else min(seen[0], LOOK_RANGE))
             self.job = _Job(self.nmpc_thread.submit(self.planner.step, scene), self.ticks, t, scene, path, s_now,
-                            s_simlingo, frame, route, [self.intent.manoeuvre, round(self.intent.offset, 3), stop])
+                            s_simlingo, frame, route, [self.intent.manoeuvre, round(self.intent.side * self.intent.offset, 3), stop])
         job = None
         if self.job is not None and (self.plan is None or self.ticks - self.job.tick >= NMPC_LATENCY):
             job, self.job = self.job, None

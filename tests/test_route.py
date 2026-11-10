@@ -1,4 +1,4 @@
-"""Route.lanes against a small fake of CARLA's map: a straight road along x with lanes of 3 m."""
+"""Route.lanes (middle_layer/perception/sensors/map.py) against a small fake of CARLA's map: a straight road along x with lanes of 3 m."""
 import math
 import types
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from expert import frames
-from expert.world_model.route import Route
+from middle_layer.perception.sensors.map import Route
 
 expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 

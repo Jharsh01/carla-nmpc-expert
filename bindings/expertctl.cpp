@@ -1,4 +1,5 @@
-// Python module `expertctl`: the NMPC core for the Bench2Drive agents (expert/agents/).
+// Python module `expertctl`: the NMPC (nmpc/) and the middle layer's perception (middle_layer/) for the Bench2Drive
+// agents (expert/agents/).
 //
 // Positions are in a right-handed world frame (heading counter-clockwise) at the centre of gravity; expert/frames.py
 // converts from CARLA's.
@@ -6,17 +7,17 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "urban/body.hpp"
-#include "urban/path.hpp"
-#include "urban/vehicle_params.hpp"
-#include "urban/planner.hpp"
-#include "urban/urban_nmpc.hpp"
+#include "nmpc/framework.hpp"
+#include "nmpc/path.hpp"
+#include "nmpc/planner.hpp"
+#include "nmpc/shared_param.hpp"
+#include "perception/perception.hpp"
 
 namespace py = pybind11;
 using namespace ex;
 
 PYBIND11_MODULE(expertctl, m) {
-    m.doc() = "NMPC core of carla-expert-nmpc: paths, vehicle parameters, the urban NMPC and the behaviour layer";
+    m.doc() = "carla-expert-nmpc: paths, vehicle parameters, the NMPC, its planner and the middle layer's scene types";
 
     py::class_<VehicleParams> params(m, "VehicleParams");
     params.def(py::init<>()).def_static("from_file", &VehicleParams::from_file).def("L", &VehicleParams::L);
@@ -54,7 +55,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("width", &Body::width)
         .def_readwrite("cg_to_center", &Body::cg_to_center);
 
-    // ---- the urban NMPC (core/urban/include/urban/urban_nmpc.hpp)
+    // ---- the NMPC (nmpc/include/nmpc/framework.hpp, problem.hpp)
 
     py::class_<ex::Ego>(m, "Ego")
         .def(py::init([](double x, double y, double psi, double v, double a, double delta) {
@@ -154,7 +155,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readonly("solve_times", &ex::UrbanNMPC::solve_times)
         .def_readonly("failures", &ex::UrbanNMPC::failures);
 
-    // ---- the behaviour layer (core/urban/include/urban/planner.hpp)
+    // ---- the middle layer's scene (middle_layer/perception) and the planner (nmpc/planner.hpp)
 
     py::class_<ex::Actor> actor(m, "Actor");
     py::enum_<ex::Actor::Kind>(actor, "Kind")
@@ -226,6 +227,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("lanes", &ex::Scene::lanes)
         .def_readwrite("actors", &ex::Scene::actors)
         .def_readwrite("stops", &ex::Scene::stops)
+        .def_readwrite("asks_change", &ex::Scene::asks_change)
         .def_readwrite("sight_left", &ex::Scene::sight_left)
         .def_readwrite("sight_right", &ex::Scene::sight_right);
 
@@ -258,6 +260,9 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("exit", &ex::PathIntent::exit)
         .def_readonly("manoeuvre", &ex::PathIntent::manoeuvre)
         .def_readonly("offset", &ex::PathIntent::offset)
+        .def_readonly("side", &ex::PathIntent::side)
+        .def_readwrite("ask", &ex::PathIntent::ask)
+        .def("asks", &ex::PathIntent::asks)
         .def("update", &ex::PathIntent::update, py::arg("s"), py::arg("e"))
         .def("reset", &ex::PathIntent::reset);
 

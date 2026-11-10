@@ -1,8 +1,8 @@
-"""The sight along a lane from a depth frame (expert/world_model/sight.py), on synthetic frames."""
+"""The sight along a lane from a depth frame (middle_layer/perception/sensors/sight.py), on synthetic frames."""
 import numpy as np
 import pytest
 
-from expert.world_model import sight
+from middle_layer.perception.sensors import sight
 
 W, H, FOV = 640, 160, 100.0
 

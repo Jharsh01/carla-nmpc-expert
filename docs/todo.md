@@ -10,7 +10,7 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    "room beside it" are new and only routes 0 and 1 have run with them. Watch for a parked car beside a two-lane band
    being driven past too close, and for borrow_right on the wrong side of the road where the map's right lane is
    oncoming (left-hand traffic).
-0b. **The band's lo/hi mix frames during a lane change** (`Route.lanes`, found 10 Nov): the merge takes min/max of
+0b. **The band's lo/hi mix frames during a lane change** (`Route.lanes`, middle_layer/perception/sensors/map.py, found 10 Nov): the merge takes min/max of
    offsets measured across the path at other rows, where the path is elsewhere. Half way into the next lane the band's
    far edge is clipped (a straight two-way test: our lane at [-3.9, -0.9] across the path, the band [-3.0, 2.2]).
    `way_lo/way_hi` are now cut at the row itself (`Route._cuts`); do the same for lo/hi.
@@ -24,7 +24,7 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
        without a lane), and while `intent.manoeuvre` passes SimLingo's points projected on the lane as
        `scene.line_s`/`line_e` (s increasing, plus a point 15 m past the last at e 0, back to the lane); else
        `[0, L]`, `[0, 0]` as now.
-    b. In `constraints.cpp`'s `lane_corridor`, where the asked line leaves the lane the band widens to take it in
+    b. In `nmpc/src/constraint/lane.cpp`'s `lane_corridor`, where the asked line leaves the lane the band widens to take it in
        (`lo = max(road_lo, min(lo, asked - margin))`, `hi` likewise), and `ref` is the line clamped to that band, so
        SimLingo's own moves out of the lane (route 1's dodge, route 2's side-lane hazard) still go through.
     Then re-run 4, and check 0, 1 and 2 for regressions. Then route 6, not yet run with any of the 9 Nov changes (with
@@ -49,7 +49,7 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    route 10. Plain SimLingo enters route 8's stream (100 %, but 11.5 s for 78.6 m looks over-counted). Design for
    this: conflicts, a registry with a lifecycle, a phase, and one space-time tube per plan compiled into the NMPC's fixed
    slots (https://claude.ai/artifact/5mgXZSJodoQ7Sk3Cf27chh; not implemented). First step: stream cars as merges and cars
-   behind as none in `sensor.cpp`, tested on routes 0 and 8. Before building the merge, decide the minimum margin and
+   behind as none in `middle_layer/perception/post_process/classify.cpp`, tested on routes 0 and 8. Before building the merge, decide the minimum margin and
    how long to wait: the slot leaves about 1 m at each end.
 1. **Route 8 hung once:** results/bench2drive/intent_a stopped ticking at 38.75 s with 47 of 192 plans failed, and the run
    sat until the script's 3600 s timeout. It was on the wrong lane then (learnings.md), but nothing says what hung. The
@@ -77,7 +77,7 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    `BRAKE` -2 are first guesses, and the brake under 6.5 m/s is still item 2b's. `1 - kappa e` is not guarded: a sharp bend in SimLingo's own line could still break it.
 4. **A car cutting in close ahead is a mover (swerve), not a lead (brake).** On route 0 the cut-in car (3697)
    pulled into the lane 5 m ahead with no "cut-in" note; the NMPC steered round it to full lock. The road edge now
-   stops that ending off the road, but braking is the right answer. Check how `sensor.cpp` classifies it.
+   stops that ending off the road, but braking is the right answer. Check how `classify.cpp` (middle_layer) classifies it.
 5. **The cut-in car stands in the lane 35 m ahead** (route 0, actor 3702, parked False, at rest). Check how it is
    classified and whether the car would wait behind it for good.
 6. **Solve time in CARLA:** p50 32 ms but p95 105 ms, and 36 of 423 plans failed on route 0. Find which candidates
@@ -88,6 +88,14 @@ Open work, most pressing first. When a task is done, delete it here and, if it t
    What is left on the loop: the scenario tree (48 ms), CARLA's step (42 ms), the sensors (19 ms), `Actors.detect`
    (36 ms a plan). Real time needs more cores (CARLA and the loop on their own) and a faster `Actors.detect`; check
    too whether `--debug` (SimLingo's frames, which the agent no longer draws) is still wanted. See learnings.md.
+
+## Overtakes on SimLingo's ask (10 Nov, learnings.md)
+
+22. **Route 4 never finds a gap from the view stop.** Choose: stop where sight is best but creep up while it does not
+    improve; judge the unseen car at the flow's speed rather than the limit; or a smaller `oncoming_gap` from rest.
+    Then run route 6 (AccidentTwoWays), not yet run with this.
+23. **`parked_car_wait` and `asked_overtake_stop@local`:** the plain wait point (b_lo - 4 m) is too close to pull out from
+    rest; the @local overtakes leave the road on the far side (e_y 2.1-5.4 m), with or without the ask.
 
 ## Found reading the code (1 November, at f14a0aa; learnings.md)
 

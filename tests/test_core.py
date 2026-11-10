@@ -62,7 +62,7 @@ def _planner_and_scene(v):
     route = expertctl.Path.from_waypoints([[x, 0.0] for x in range(-15, 200, 5)], False)
     params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
     options = expertctl.UrbanOptions()
-    options.a_min = -7.0
+    options.a_min = -4.6
     options.horizon, options.fine = 2.0, 1.0
     options.h_fine, options.h = 0.05, 0.2
     planner_options = expertctl.PlannerOptions()
