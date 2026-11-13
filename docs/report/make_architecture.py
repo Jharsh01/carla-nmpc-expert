@@ -197,13 +197,13 @@ def fig_system():
          FILL["simlingo"])
     _box(ax, 0.355, row(1) - bh, 0.29, bh, "simlingo_ref.py\npath_points: 15 m behind + SimLingo's\n"
          "speed_reference: v_ref(t)\nOdometry: speedometer + compass\n→ the old frame for set_route", FILL["simlingo"])
-    _box(ax, 0.69, row(1) - bh, 0.29, bh, "World model (privileged)\nactors.py: visible, tracked, predicted\n"
-         "route.py: lane continuation (160 m),\nlanes, stop lines, route end\nreported in the car frame",
+    _box(ax, 0.69, row(1) - bh, 0.29, bh, "Middle layer: sensors (privileged)\nactors.py: visible, tracked, predicted\n"
+         "map.py: lanes either side, stops, route end\nsight.py: depth camera along the lanes\nreported in the car frame",
          FILL["world"])
     _box(ax, 0.17, row(2) - 0.09, 0.66, 0.09, "Scene (car frame: the car at the origin, x forward, y left)\n"
          "ego (v, a, δ) · path · line · v_ref(t) · lanes · actors (t, x, y, ψ) · stops · v_max", FILL["tool"])
-    _box(ax, 0.02, row(3) - bh - 0.02, 0.43, bh + 0.02, "Behaviour layer (core/urban/behaviour)\n"
-         "classify: lead · blocker · crosser · mover\ncandidates: base · pass:<id> · borrow_left\n"
+    _box(ax, 0.02, row(3) - bh - 0.02, 0.43, bh + 0.02, "Perception post-process + NMPC planner\n"
+         "classify: lead · blocker · crosser · mover\ncandidates: base · pass:<id> · borrow_left/right\n"
          "rules: stop-sign hold, red-light dilemma\nscore, last choice × 0.9 → the chosen plan", FILL["nmpc"])
     _box(ax, 0.55, row(3) - bh - 0.02, 0.43, bh + 0.02, "UrbanNMPC × 4 (one thread each)\n"
          "kinematic bicycle in path coordinates\nx = [s, e_y, e_ψ, v, a, δ],  u = [jerk, δ_rate]\n"
@@ -247,7 +247,7 @@ def fig_tick():
         if k % 2 == 0:
             ax.add_patch(Rectangle((t, 0.2), 0.044 * 1.6, 0.55, fc=FILL["nmpc"], ec=ORANGE, lw=0.8))
     for y, lab in [(2.27, "SimLingo predicts\n(every tick)"), (1.37, "actuation from the plan\n(every tick, 20 Hz)"),
-                   (0.47, "new path + scene + behaviour\nstep (every 2nd tick, 10 Hz)")]:
+                   (0.47, "new path + scene + planner\nstep (every 2nd tick, 10 Hz)")]:
         ax.text(-0.012, y, lab, ha="right", va="center", fontsize=7, color=INK2)
     ax.annotate("", xy=(0.10 + 0.25, 1.05), xytext=(0.10, 1.05), arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.8))
     ax.text(0.10 + 0.125, 0.93, "a sampled 0.25 s ahead, δ 0.15 s ahead (the car's lags)", ha="center", fontsize=6.4,
@@ -426,19 +426,22 @@ def build(out):
                "truth for now, but only what a perception stack on Bench2Drive's sensors could see, and reports it "
                "relative to the car, so a learned perception model can take its place behind the same Scene."))
     s.append(figure(fig_system()))
-    s.append(P("Figure 1. Data flow through one plan. Blue: SimLingo and its reference; green: the world model "
-               "(privileged); orange: the behaviour layer and the NMPC (C++, core/urban); violet: actuation; grey: "
+    s.append(P("Figure 1. Data flow through one plan. Blue: SimLingo and its reference; green: the middle "
+               "layer's sensors (privileged); orange: perception's post-processing and the NMPC (C++, middle_layer/, nmpc/); violet: actuation; grey: "
                "the launcher, logging and the live view, which do not take part in driving.", caption))
     s.append(table([
         ["Part", "Where", "What it does"],
         ["SimLingo", "external/simlingo/team_code/agent_simlingo.py", "LingoAgent: predicts pred_route and pred_speed_wps each tick"],
         ["Agent", "expert/agents/simlingo_nmpc_agent.py", "LingoAgent with control_pid replaced: the per-tick loop, scene, actuation, log"],
         ["Reference", "expert/simlingo_ref.py", "SimLingo's outputs as path points and v_ref(t); odometry between plans"],
-        ["World model", "expert/world_model/actors.py, route.py", "visible actors with predictions; lanes, stop lines, route end, lane continuation"],
+        ["Sensors", "middle_layer/perception/sensors/{actors,map,sight}.py", "visible actors with predictions; lanes either side, stop lines, route end, lane continuation; sight along the lanes"],
         ["Frames", "expert/frames.py", "CARLA (left-handed, degrees) to the library's frame; Frame: world to car frame"],
-        ["Behaviour", "core/urban/{include,src}/behaviour", "classification, traffic rules, candidates, parallel solves, choice"],
-        ["NMPC", "core/urban/{include,src}/urban_nmpc", "the optimal control problem, CasADi + FATROP, warm start, set_route"],
-        ["Path", "core/urban/.../path", "biarc path through waypoints: projection, pose, curvature"],
+        ["Post-process", "middle_layer/perception/post_process", "the scene in path coordinates: tracks, classification, lanes, left/right lanes"],
+        ["Constraints", "nmpc/src/constraint", "each manoeuvre's rule and rows: lane, movers, follow, stop, crossing, overtake, turn, grip"],
+        ["Planner", "nmpc/{include,src}/planner", "perceive, build the candidates, solve them in parallel, choose"],
+        ["NMPC", "nmpc/{include,src}/framework, cost", "the optimal control problem, CasADi + FATROP, warm start, set_route"],
+        ["Parameters", "nmpc/include/nmpc/shared_param.hpp", "the car and every tunable of both layers"],
+        ["Path", "nmpc/.../path", "biarc path through waypoints: projection, pose, curvature"],
         ["Bindings", "bindings/expertctl.cpp", "the Python module expertctl (pybind11, Python 3.8)"],
         ["Actuation", "expert/mkz_actuation.py", "acceleration and road-wheel angle to throttle, brake, steer (measured tables)"],
         ["Launcher", "scripts/run_bench2drive.sh, b2d_evaluator.py", "one leaderboard process per route; watchdog; results"],
@@ -449,7 +452,7 @@ def build(out):
     s.append(P("2. One tick", h1))
     s.append(P("The leaderboard ticks CARLA at 20 Hz in synchronous mode and waits for the agent each tick. SimLingo "
                "predicts every tick. Every second tick the agent builds a new path from the latest prediction, reads "
-               "the world model, and runs a behaviour step (10 Hz). Every tick it samples the current plan a little "
+               "the world model, and runs a planner step (10 Hz). Every tick it samples the current plan a little "
                "ahead, for the car's lags, and turns it into throttle, brake and steer."))
     s.append(figure(fig_tick(), 160))
     s.append(P("Figure 2. Timing within a tick and across ticks.", caption))
@@ -462,7 +465,7 @@ def build(out):
         "pose in the new one, so the solver starts warm.",
         "World model: actors detected and tracked (in the world), predicted 5 s ahead, reported in the car's frame; "
         "lanes and stop lines along the path; v_max from the speed limit.",
-        "Scene → Behaviour.step → Decision (the chosen plan, all candidates, notes), then the log row and the live view.",
+        "Scene → Planner.step → Decision (the chosen plan, all candidates, notes), then the log row and the live view.",
     ])
 
     s.append(P("3. Frames: why nothing needs a global position", h1))
@@ -522,7 +525,7 @@ def build(out):
                "and through a circle it has no gradient to go round. The behaviour layer makes those discrete choices "
                "and lets the NMPC solve each one."))
     s.append(figure(fig_behaviour(), 172))
-    s.append(P("Figure 5. One behaviour step.", caption))
+    s.append(P("Figure 5. One planner step.", caption))
     s += bullets([
         "<b>Blocker</b>: a parked car or an object in the lane (reaching blocker_overlap into it), kept until passed: "
         "stopped behind, or gone round in the left lane (borrow_left) when it is within blocker_range and no visible "
@@ -576,28 +579,32 @@ def build(out):
     s.append(PageBreak())
     s.append(P("8. Parameters", h1))
     s.append(P("Read from the code when this document was built.", small))
-    s.append(P("Table 4. UrbanNMPC::Options (core/urban/include/urban/urban_nmpc.hpp)", h2))
+    s.append(P("Table 4. NmpcOptions (nmpc/include/nmpc/shared_param.hpp)", h2))
     s.append(table([["Name", "Default", "Meaning"]] +
-                   [[n, v, c] for n, v, c in struct_fields("core/urban/include/urban/urban_nmpc.hpp", "struct Options {")],
+                   [[n, v, c] for n, v, c in struct_fields("nmpc/include/nmpc/shared_param.hpp", "struct NmpcOptions {")],
                    [30, 18, 124]))
     s.append(P("The agent sets a_min = −7.0, jit = true, cache_dir = build/urban_cache.", small))
-    s.append(P("Table 5. Behaviour::Options (core/urban/include/urban/behaviour.hpp)", h2))
+    s.append(P("Table 5. PlannerOptions: perception's, the constraints' and the choice's "
+               "(nmpc/include/nmpc/shared_param.hpp)", h2))
     s.append(table([["Name", "Default", "Meaning"]] +
-                   [[n, v, c] for n, v, c in struct_fields("core/urban/include/urban/behaviour.hpp", "struct Options {")],
+                   [[n, v, c] for opening in ["struct PerceptionOptions {", "struct ConstraintOptions : PerceptionOptions {",
+                                              "struct PlannerOptions : ConstraintOptions {"]
+                    for n, v, c in struct_fields("nmpc/include/nmpc/shared_param.hpp", opening)],
                    [30, 18, 124]))
     s.append(P("Table 6. The vehicle: config/vehicles/mkz2020.json (derivations: docs/vehicle_parameters.md)", h2))
     s.append(table([["Name", "Value", "Source", "Meaning"]] + vehicle_rows(), [24, 22, 16, 110]))
     s.append(P("Body (the agent's): length 4.89 m, width 1.84 + 0.2 m (mirrors), centre of gravity 0.31 m ahead of "
                "the body's centre, 0.30 m ahead of the car's origin.", small))
-    s.append(P("Table 7. The agent, the reference and the world model (Python constants)", h2))
+    s.append(P("Table 7. The agent, the reference and the sensors (Python constants)", h2))
     rows = [["Name", "Value", "Meaning", "File"]]
-    for path in ["expert/agents/simlingo_nmpc_agent.py", "expert/simlingo_ref.py", "expert/world_model/route.py",
-                 "expert/world_model/actors.py", "scripts/b2d_evaluator.py"]:
+    for path in ["expert/agents/simlingo_nmpc_agent.py", "expert/simlingo_ref.py",
+                 "middle_layer/perception/sensors/map.py", "middle_layer/perception/sensors/actors.py",
+                 "middle_layer/perception/sensors/sight.py", "scripts/b2d_evaluator.py"]:
         for n, v, c in py_constants(path):
             if n in ("REPO", "PAGE"):
                 continue
             rows.append([n, v.replace("float(os.environ.get(", "env ").replace(") or 0.0)", ""), c, path.split("/")[-1]])
-    for n, v in py_defaults("expert/world_model/actors.py", "def __init__(self, expertctl, carla, world, carla_map, hero"):
+    for n, v in py_defaults("middle_layer/perception/sensors/actors.py", "def __init__(self, expertctl, carla, world, carla_map, hero"):
         rows.append([n, v, {"look_range": "detection range [m]", "walker_range": "detection range for walkers [m]",
                             "keep": "a track is kept this long after last seen [s]"}.get(n, ""), "actors.py"])
     for n, v in py_defaults("expert/mkz_actuation.py", "def __init__(self, path, dt"):

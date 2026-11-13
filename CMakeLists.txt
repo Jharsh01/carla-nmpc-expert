@@ -1,5 +1,5 @@
-# carla-expert-nmpc: the urban NMPC and its behaviour layer (core/urban), its offline closed-loop scenarios
-# (sim/urban), and the Python module expertctl the Bench2Drive agents use.
+# carla-expert-nmpc: the NMPC and its planner (nmpc/), the middle layer's perception (middle_layer/), their offline
+# closed-loop scenarios (sim/urban), and the Python module expertctl the Bench2Drive agents use.
 #
 #   cmake -S . -B build && cmake --build build -j && ctest --test-dir build
 #
@@ -40,7 +40,7 @@ find_package(pybind11 CONFIG REQUIRED)
 find_package(casadi CONFIG REQUIRED)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
-find_package(Threads REQUIRED)  # the behaviour layer solves its candidates in parallel
+find_package(Threads REQUIRED)  # the planner solves its candidates in parallel
 find_package(nlohmann_json 3.2 QUIET)  # vehicle parameter files
 if(NOT nlohmann_json_FOUND)
     include(FetchContent)
@@ -53,23 +53,13 @@ get_filename_component(CASADI_LIB_DIR ${CASADI_LIBRARY} DIRECTORY)
 set(RPATH ${CASADI_LIB_DIR})
 enable_testing()
 
-# ---- the urban NMPC (core/urban)
+# ---- the two layers: libraries nmpc_shared (paths, vehicle parameters), perception and nmpc
 
-add_library(urban STATIC
-    core/urban/src/path.cpp
-    core/urban/src/vehicle_params.cpp
-    core/urban/src/urban_nmpc.cpp
-    core/urban/src/behaviour.cpp)
-target_include_directories(urban PUBLIC ${CMAKE_SOURCE_DIR}/core/urban/include)
-target_link_libraries(urban PUBLIC Eigen3::Eigen Threads::Threads PRIVATE casadi::casadi nlohmann_json::nlohmann_json)
-
-add_executable(test_path core/urban/tests/test_path.cpp)
-target_link_libraries(test_path PRIVATE urban)
-set_target_properties(test_path PROPERTIES BUILD_RPATH "${RPATH}")
-add_test(NAME urban.test_path COMMAND test_path)
+add_subdirectory(nmpc)
+add_subdirectory(middle_layer)
 
 add_executable(urban_scenarios sim/urban/scenarios.cpp)  # offline closed-loop scenarios for the urban NMPC
-target_link_libraries(urban_scenarios PRIVATE urban)
+target_link_libraries(urban_scenarios PRIVATE nmpc)
 target_compile_options(urban_scenarios PRIVATE -Wno-missing-field-initializers)  # scenarios are aggregates, partly filled
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/urban_cache)
 target_compile_definitions(urban_scenarios PRIVATE URBAN_CACHE_DIR="${CMAKE_BINARY_DIR}/urban_cache"
@@ -80,5 +70,5 @@ add_test(NAME urban.scenarios COMMAND urban_scenarios)
 # ---- Python module for the agents: build/python/expertctl*.so
 
 pybind11_add_module(expertctl bindings/expertctl.cpp)
-target_link_libraries(expertctl PRIVATE urban)
+target_link_libraries(expertctl PRIVATE nmpc)
 set_target_properties(expertctl PROPERTIES BUILD_RPATH "${RPATH}" LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python)

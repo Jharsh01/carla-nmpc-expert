@@ -1,4 +1,4 @@
-"""Route.lanes against a small fake of CARLA's map: a straight road along x with lanes of 3 m."""
+"""Route.lanes (middle_layer/perception/sensors/map.py) against a small fake of CARLA's map: a straight road along x with lanes of 3 m."""
 import math
 import types
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from expert import frames
-from expert.world_model.route import Route
+from middle_layer.perception.sensors.map import Route
 
 expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 
@@ -132,8 +132,113 @@ def test_lane_path_keeps_to_the_lane_and_not_the_car():
     assert y == pytest.approx(-centre, abs=0.02)
 
 
+def test_lane_path_from_the_oncoming_lane_is_the_lane_to_come_back_to():
+    """Bench2Drive route 4: out in the oncoming lane round a blocker, the path is the car's own lane beside it, not
+    the oncoming lane along the way the car goes (which lost the blocker and kept the car in the oncoming flow)."""
+    route = _route(_road((1, 180.0, LaneType.Driving), (-1, 0.0, LaneType.Driving)))
+    oncoming, ours = route.map.lanes
+    frame = frames.Frame(10.0, -oncoming.y, 0.0)  # in the oncoming lane, heading our way
+    path = route.lane_path(frame)
+    s, e = path.project(0.0, 0.0)
+    assert e == pytest.approx(W, abs=0.05)  # the car is a lane to the left of the path
+    x, y = frame.to_world(path.pose(s + 30.0).x, path.pose(s + 30.0).y)
+    assert y == pytest.approx(-ours.y, abs=0.02)
+    assert x > 30.0  # along the way the car goes
+
+
 def test_lanes_are_looked_up_at_the_cars_height():
     """Town12's roads are 300-380 m up: from z = 0 CARLA gives the lane beside the car on 19 % of its road points."""
     route = _route(_road((-1, 0.0, LaneType.Driving), (1, 180.0, LaneType.Driving)))
     route.lane_path(frames.Frame(10.0, -route.map.lanes[0].y, 0.0, 358.0))
     assert route.map.z == 358.0
+
+
+def _lanes_on(route, path, frame):
+    route.lanes(path, frame)
+    return lambda x, y: route.ego_lanes(path, x, y)
+
+
+def test_ego_lanes_are_the_paths_lane_and_both_lanes_of_a_lane_change():
+    # from the left: an oncoming lane, a lane our way, the car's lane (CARLA y = 0), a shoulder
+    route = _route(_road((1, 180.0, LaneType.Driving), (-2, 0.0, LaneType.Driving), (-1, 0.0, LaneType.Driving),
+                         (-3, 0.0, LaneType.Shoulder)))
+    frame = frames.Frame(0.0, 0.0, 0.0)
+    straight = _path([(x, 0.0) for x in range(-15, 100, 2)])
+    used = _lanes_on(route, straight, frame)
+    assert {k[2] for k in used(20.0, 0.0)} == {-1}
+    assert {k[2] for k in used(20.0, 3.0)} == {-1}  # level with the point: still the car's lane
+    change = _path([(x, 0.0) for x in range(-15, 20, 2)] + [(x, 3.0) for x in range(30, 100, 2)])
+    used = _lanes_on(route, change, frame)
+    assert {k[2] for k in used(25.0, 1.5)} == {-1, -2}
+    assert {k[2] for k in used(80.0, 3.0)} == {-2, -1}  # far along it: its lane, and the one the car's body is in now
+
+
+def test_ego_lanes_are_unknown_in_a_junction():
+    route = _route(_road(*TWO_WAY))
+    route._ego_lanes = [{(1, 0, -1)}, None, None, {(1, 0, -1)}, {(1, 0, -1)}, {(1, 0, -1)}]
+    path = _path([(x, 0.0) for x in range(0, 30, 2)])
+    assert route.ego_lanes(path, 2.0, 0.0) is None
+    assert route.ego_lanes(path, 9.0, 0.0) == {(1, 0, -1)}
+
+
+def test_ego_lanes_take_in_any_lane_the_cars_body_is_in():
+    """Bench2Drive route 1: stood across the double yellow, nose in the oncoming lane, with the path back in its own: a
+    car in that lane was taken to stay out of the car's way, and it hit the car."""
+    route = _route(_road(*TWO_WAY))
+    frame = frames.Frame(0.0, 1.0, math.radians(45.0))  # library's y: 1 m to the left of the lane's centre, turned left
+    path = _path([(x, -x) for x in range(-10, 60, 2)])  # in the car's frame: back along the lane
+    used = _lanes_on(route, path, frame)
+    assert {k[2] for k in used(20.0, -20.0)} == {-1, 1}
+
+
+def test_the_lanes_either_side_and_which_way_they_run():
+    """From the left: an oncoming lane, the car's lane, a lane the car's way. Read from the map, not assumed."""
+    road = [(2, 180.0, LaneType.Driving), (-1, 0.0, LaneType.Driving), (-2, 0.0, LaneType.Driving)]
+    route = _route(_road(*road))
+    centre = route.map.lanes[1].y
+    l = _at(route.lanes(_path([(-20.0, -centre), (60.0, -centre)]), frames.Frame(0.0, 0.0, 0.0)), 30.0)
+    assert l.left_allowed and l.left_oncoming and l.left_width == pytest.approx(W)
+    assert l.right_allowed and not l.right_oncoming and l.right_width == pytest.approx(W)
+    route = _route(_road(*TWO_WAY))  # a shoulder on the right: no lane there
+    l = _at(route.lanes(_path([(-20.0, 0.0), (60.0, 0.0)]), frames.Frame(0.0, 0.0, 0.0)), 30.0)
+    assert not l.right_allowed and l.right_width == 0.0
+
+
+def test_where_the_band_takes_in_two_lanes_its_sides_are_beyond_both():
+    """Bench2Drive route 1: changing into the lane on the left, which runs the car's way, with an oncoming lane beyond
+    it. Around the change the band takes in both lanes our way: what is on its left is the oncoming lane, and on its
+    right whatever is right of the lane the car leaves (nothing here)."""
+    road = [(2, 180.0, LaneType.Driving), (-1, 0.0, LaneType.Driving), (-2, 0.0, LaneType.Driving)]
+    route = _route(_road(*road))
+    right_lane, left_lane = -route.map.lanes[2].y, -route.map.lanes[1].y  # library y
+    pts = [(x, right_lane if x <= 40 else left_lane if x >= 60 else right_lane + (left_lane - right_lane) * (x - 40) / 20)
+           for x in np.arange(-20.0, 121.0, 2.0)]
+    sections = route.lanes(_path(pts), frames.Frame(0.0, 0.0, 0.0))
+    l = _at(sections, 70.0)
+    assert l.hi - l.lo > 1.9 * W
+    assert l.left_allowed and l.left_oncoming
+    assert not l.right_allowed
+    before = _at(sections, 10.0)  # in the right lane: the lane our way on its left
+    assert before.left_allowed and not before.left_oncoming
+
+
+def path_pose(pts, s):
+    return _path(pts).pose(s)
+
+
+def test_a_band_out_into_the_oncoming_lane_says_which_part_runs_our_way():
+    route = _route(_road(*TWO_WAY))
+    own, other = -route.map.lanes[2].y, -route.map.lanes[1].y  # library y of the car's lane and the oncoming one
+    pts = [(x, own if x <= 40 else other if x >= 60 else own + (other - own) * (x - 40) / 20)
+           for x in np.arange(-20.0, 121.0, 2.0)]
+    sections = route.lanes(_path(pts), frames.Frame(0.0, 0.0, 0.0))
+    l = _at(sections, 70.0)  # x 50, half way over
+    assert l.hi - l.lo > 1.9 * W  # both lanes
+    # all through the change, across the path where it is: our way is the band's right lane only, the left one
+    # oncoming (a merge of offsets measured where the path was still in our lane put it on the oncoming lane)
+    for s in np.arange(62.0, 80.0, 2.0):
+        l, q = _at(sections, s), path_pose(pts, s)
+        assert l.way_hi - l.way_lo == pytest.approx(W, abs=0.3)
+        assert q.y + l.way_hi * math.cos(q.psi) == pytest.approx(own + 0.5 * W, abs=0.3)  # our lane's left edge
+    straight = _at(route.lanes(_path([(-20.0, own), (60.0, own)]), frames.Frame(0.0, 0.0, 0.0)), 30.0)
+    assert (straight.way_lo, straight.way_hi) == (pytest.approx(straight.lo), pytest.approx(straight.hi))

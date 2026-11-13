@@ -6,7 +6,7 @@
 #
 #   scripts/run_bench2drive.sh --agent simlingo_nmpc --routes 0-9   SimLingo through the urban NMPC
 #                                                                   (expert/agents/simlingo_nmpc_agent.py),
-#                                                                   SimLingo predicting at 1 Hz, the NMPC at 5 Hz
+#                                                                   SimLingo predicting at 2 Hz, the NMPC at 5 Hz
 #   scripts/run_bench2drive.sh --agent simlingo ...                 SimLingo with its PID, as published (the default)
 #
 #   scripts/run_bench2drive.sh                       all 220 routes (days on one GPU: see below)
@@ -146,7 +146,7 @@ for i in "${ids[@]}"; do
         finished "$res" && break
         echo "== $name (attempt $t/$tries)  $(date +%H:%M:%S)"
         rm -f "$res"
-        SAVE_PATH=$out_root/viz/ ROUTES=$route timeout 3600 "$VPY" -u \
+        SAVE_PATH=$out_root/viz/ ROUTES=$route timeout 600  "$VPY" -u \
             "$REPO/scripts/b2d_evaluator.py" \
             --routes="$route" --repetitions=1 --track=SENSORS --checkpoint="$res" --timeout=600 \
             --agent="$AGENT_FILE" --agent-config="$AGENT_CONFIG" \

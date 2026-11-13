@@ -9,15 +9,28 @@ import pytest
 from expert import frames, simlingo_ref
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+expertctl = pytest.importorskip("expertctl", reason="build the module first: cmake --build build")
 
 
 def test_path_points_in_the_cars_frame():
     # SimLingo's y is to the right; the path's is to the left
     route = [[0.2, 0.0], [1.0, 0.0], [1.3, 0.0], [2.0, 0.1], [1.5, 0.1], [3.0, 0.2]]
     pts = simlingo_ref.path_points(route)
-    assert pts[0] == pytest.approx([-simlingo_ref.BEHIND, 0.0])
+    assert pts[0, 0] == pytest.approx(0.2 - simlingo_ref.BEHIND, abs=0.1)
     assert np.all(np.diff(pts[:, 0]) > 0.0)  # always on forwards
-    assert pts[-3:] == pytest.approx(np.array([[1.0, 0.0], [2.0, -0.1], [3.0, -0.2]]))  # 0.2, 1.3 too close, 1.5 back
+    # 1.3 too close, 1.5 back
+    assert pts[-4:] == pytest.approx(np.array([[0.2, 0.0], [1.0, 0.0], [2.0, -0.1], [3.0, -0.2]]))
+
+
+def test_the_path_keeps_the_line_where_it_is_and_does_not_bend_to_the_car():
+    """Bench2Drive route 1: a new prediction 0.69 m to the right of the car, first point 0.2 m ahead. Joined to the car
+    that was a turn of 74 deg, radius 0.2 m, and the plans failed."""
+    route = [[0.2 + k, 0.69] for k in range(20)]  # SimLingo's: y right
+    pts = simlingo_ref.path_points(route)
+    assert pts[:, 1] == pytest.approx(-0.69)  # straight, the car 0.69 m to its left
+    path = expertctl.Path.from_waypoints([list(p) for p in pts], False)
+    assert max(abs(path.curvature(s)) for s in np.arange(0.0, path.length, 0.1)) < 0.01
+    assert path.project(0.3, 0.0)[1] == pytest.approx(0.69)
 
 
 def test_speed_reference_with_and_without_the_car_first():
@@ -128,11 +141,11 @@ def test_set_route_into_the_cars_frame():
         assert moved.iterations <= same.iterations + 2
 
 
-def test_behaviour_set_route():
+def test_planner_set_route():
     params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
-    options = expertctl.BehaviourOptions()
+    options = expertctl.PlannerOptions()
     options.pool = 1
-    b = expertctl.Behaviour(expertctl.Path.from_waypoints([[0.0, 0.0], [400.0, 0.0]], False), params,
+    b = expertctl.Planner(expertctl.Path.from_waypoints([[0.0, 0.0], [400.0, 0.0]], False), params,
                             expertctl.Body(), expertctl.UrbanOptions(), options)
     scene = expertctl.Scene()
     scene.ego = expertctl.Ego(x=20.0, v=8.0)
@@ -149,15 +162,15 @@ def test_behaviour_set_route():
 
 
 def test_live_view_serves_a_plan():
-    """A behaviour step on a small scene, its snapshot published, and the page and the stream read back."""
+    """A planner step on a small scene, its snapshot published, and the page and the stream read back."""
     import json
     import urllib.request
     from expert import live_view
     params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
-    options = expertctl.BehaviourOptions()
+    options = expertctl.PlannerOptions()
     options.pool = 2
     path = expertctl.Path.from_waypoints([[-15.0, 0.0], [0.0, 0.0], [200.0, 0.0]], False)
-    b = expertctl.Behaviour(path, params, expertctl.Body(), expertctl.UrbanOptions(), options)
+    b = expertctl.Planner(path, params, expertctl.Body(), expertctl.UrbanOptions(), options)
     scene = expertctl.Scene()
     scene.ego = expertctl.Ego(x=0.3, v=6.0)
     scene.v_max = 8.0
@@ -196,8 +209,33 @@ def test_path_intent_is_measured_from_the_lane_with_hysteresis():
     assert not intent.update(s, [0.0, 0.0, 0.1, 0.2, 0.3])
 
 
+def test_path_intent_asks_to_change_lane_to_a_side_before_it_is_a_manoeuvre():
+    intent = expertctl.PathIntent()
+    s = [0.0, 4.0, 8.0, 12.0, 18.0]
+    intent.update(s, [0.0, 0.0, 0.1, 0.2, 0.3])  # keeping the lane
+    assert intent.asks() == 0
+    assert not intent.update(s, [0.0, 0.1, 0.2, 0.5, 0.7])  # leaning left: asks, not yet a manoeuvre
+    assert intent.asks() == 1 and intent.side == 1
+    intent.update(s, [0.0, -0.1, -0.3, -1.5, -2.8])  # to the right
+    assert intent.asks() == -1
+    scene = expertctl.Scene()
+    scene.asks_change = intent.asks()
+    assert scene.asks_change == -1
+
+
 def test_asks_to_stop():
     t = [0.1, 0.6, 1.1, 1.6, 2.6]
     assert not simlingo_ref.asks_to_stop(t, [0.4, 3.0, 4.0, 4.0, 0.0])  # moving off; a stop past the window
     assert simlingo_ref.asks_to_stop(t, [6.0, 4.0, 2.0, 0.5, 0.0])
 
+
+
+def test_odometry_ignores_a_nan_compass():
+    """CARLA's compass reads NaN now and then: that tick turns nothing, and the pose stays finite."""
+    odo = simlingo_ref.Odometry()
+    odo.update(5.0, 0.3, 0.05)
+    odo.update(5.0, float("nan"), 0.05)
+    odo.update(5.0, 0.3, 0.05)
+    x, y, psi = odo.pose()
+    assert all(math.isfinite(v) for v in (x, y, psi))
+    assert abs(psi) < 1e-12 and abs(x - 0.75) < 1e-9 and abs(y) < 1e-9

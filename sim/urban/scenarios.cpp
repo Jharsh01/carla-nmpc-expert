@@ -1,16 +1,17 @@
-// Offline closed-loop scenarios for the behaviour layer and the urban NMPC (core/urban): the situations Bench2Drive
-// is made of, scripted on a straight two-lane road (one on a curve), without CARLA.
+// Offline closed-loop scenarios for the NMPC and its planner (nmpc/) with the middle layer's perception
+// (middle_layer/): the situations Bench2Drive is made of, scripted on a straight two-lane road (one on a curve),
+// without CARLA.
 //
 // The plant is a kinematic bicycle with a first-order lag on the acceleration and a rate-limited lag on the steering,
 // so the NMPC drives something it does not model exactly. It solves every 0.1 s and its plan is played at 20 Hz, as
 // in the leaderboard. Other actors follow scripts; the NMPC sees each one from when it becomes visible, predicted at
 // constant velocity (one braking also at constant deceleration, to standstill), as the world model will in CARLA.
-// The behaviour layer (urban/behaviour.hpp) decides what the NMPC is asked to do.
+// The planner (nmpc/planner.hpp) decides what the NMPC is asked to do, from the middle layer's perception.
 //
 //   build/urban_scenarios [--only NAME] [--out DIR]     exit status 1 if any scenario fails its checks
 //
-// Each scenario also runs as <name>@local: the behaviour layer then plans along a short path rebuilt every plan,
-// as SimLingo's predicted path will be in CARLA (Behaviour::set_route), not along the scenario's road. The path
+// Each scenario also runs as <name>@local: the planner then plans along a short path rebuilt every plan,
+// as SimLingo's predicted path will be in CARLA (Planner::set_route), not along the scenario's road. The path
 // starts at the car, joins the lane centre smoothly over 15 m with a different wobble each time, reaches 20 m ahead and
 // goes on along the lane centre for 160 m (the map's lane, past SimLingo's last point). The lanes and stop lines
 // are taken along it from the road, as the world model does from the map.
@@ -30,8 +31,8 @@
 #include <string>
 #include <vector>
 
-#include "urban/vehicle_params.hpp"
-#include "urban/behaviour.hpp"
+#include "nmpc/shared_param.hpp"
+#include "nmpc/planner.hpp"
 
 using namespace ex;
 
@@ -99,6 +100,7 @@ struct Scripted {
     double visible_from = 0.0;  // [s]: occluded before
     Actor::Kind kind = Actor::vehicle;
     bool parked = false;
+    bool known = false;  // predicted along its script (a car following its lane through a junction), not straight on
 };
 
 
@@ -113,12 +115,15 @@ struct Scenario {
     std::function<std::string(const std::vector<std::array<double, 8>>&)> goal;
     double road_lo = -0.5 * LANE, road_hi = 0.5 * LANE;  // where the body must stay [m]
     bool local = false;  // plan along a local path rebuilt every plan (<name>@local)
+    int asks_change = 0;  // SimLingo's line leaving the lane to this side throughout (Scene::asks_change)
+    // how far the car at (s, e_y) sees along the lane to its left (Scene::sight_left); none: not limited
+    std::function<double(double s, double e)> sight_left;
 };
 
 // A path as SimLingo predicts one, for the car at (s_car, e_car) on the road: from 15 m behind to 20 m ahead,
 // starting at the car and joining the lane centre (with a wobble of up to `wobble`) smoothly over 15 m; then on
 // along the lane centre for 160 m (as the agent goes on along the map's lane past SimLingo's last point), as far as
-// the behaviour layer looks for actors (look_ahead + 80 m).
+// perception looks for actors (look_ahead + 80 m).
 Path local_path(const Path& road, double s_car, double e_car, double wobble, std::mt19937& rng) {
     std::uniform_real_distribution<double> phase(0.0, 2.0 * M_PI);
     const double phi = phase(rng);
@@ -177,7 +182,11 @@ std::vector<Actor> perceive(const Scenario& sc, double t) {
         act.parked = a.parked;
         act.length = a.length;
         act.width = a.width;
-        for (double tau = 0.0; tau <= 5.0 + 1e-9; tau += 0.25) {
+        for (double tau = 0.0; a.known && tau <= 5.0 + 1e-9; tau += 0.25) {
+            const Motion f = a.at(t + tau);
+            act.t.push_back(tau), act.x.push_back(f.s), act.y.push_back(f.e), act.psi.push_back(f.psi);
+        }
+        for (double tau = 0.0; !a.known && tau <= 5.0 + 1e-9; tau += 0.25) {
             const double stop = m.as < 0.0 ? std::min(tau, -m.vs / m.as) : tau;
             act.t.push_back(tau);
             act.x.push_back(m.s + m.vs * stop + 0.5 * std::min(m.as, 0.0) * stop * stop);
@@ -203,7 +212,7 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     UrbanNMPC::Options nmpc_options;
     nmpc_options.jit = true;  // compiled once into the cache, loaded after that
     nmpc_options.cache_dir = URBAN_CACHE_DIR;
-    Behaviour behaviour(sc.route, p, body, nmpc_options, Behaviour::Options());
+    Planner planner(sc.route, p, body, nmpc_options, Planner::Options());
     std::mt19937 rng(1);
     std::vector<double> step_times;
     const double L = p.L(), lr = p.b;
@@ -214,6 +223,8 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     double x = start.x, y = start.y, psi = start.psi, v = sc.v0, a = 0.0, delta = 0.0;
     Plan plan;
     double t_plan = 0.0;
+    double reverse_delta = 0.0;
+    bool reversing = false;  // backing up as the planner asked (Decision::reverse), in place of the plan
     Result res{sc.name};
     std::vector<std::array<double, 8>> trace;  // t, s, e_y, v, a, delta, jerk, a_lat
     double a_prev = 0.0;
@@ -224,7 +235,7 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
     }
     for (int tick = 0; tick * dt_ctrl <= sc.t_end + 1e-9; ++tick) {
         const double t = tick * dt_ctrl;
-        Ego ego{x, y, psi, v, a, delta};
+        Ego ego{x, y, psi, std::max(0.0, v), a, delta};  // the speedometer's, as the agent passes it on
         const auto [s, e] = sc.route.project(x, y);
         double solve_ms = 0.0;
         if (tick % solve_every == 0) {
@@ -234,7 +245,9 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
             scene.v_max = sc.v_max;
             scene.lanes = sc.lanes;
             scene.actors = perceive(sc, t);
+            scene.asks_change = sc.asks_change;
             if (sc.stops) scene.stops = sc.stops(t);
+            if (sc.sight_left) scene.sight_left = sc.sight_left(s, e);
             if (sc.local) {
                 Path local = local_path(sc.route, s, e, 0.15, rng);
                 const LaneSection lane = sc.lanes.empty() ? LaneSection{} : sc.lanes.front();
@@ -247,11 +260,13 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
                     scene.line_s.push_back(ls);
                     scene.line_e.push_back(0.0);
                 }
-                behaviour.set_route(std::move(local));
+                planner.set_route(std::move(local));
             }
-            const Decision d = behaviour.step(scene);
+            const Decision d = planner.step(scene);
             plan = d.plan;
             t_plan = t;
+            reversing = d.reverse > 0.3 && v < 0.3;
+            reverse_delta = d.reverse_delta;
             solve_ms = 1e3 * d.wall_time;
             step_times.push_back(d.wall_time);
             if (!d.plan.success) ++res.failures;
@@ -262,6 +277,8 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
                     const double slack = *std::max_element(c.plan.slack_max.begin(), c.plan.slack_max.end());
                     std::printf(" %s: %d it %.1f ms cost %.0f slack %.2f%s |", c.label.c_str(), c.plan.iterations,
                                 1e3 * c.plan.solve_time, c.plan.cost, slack, c.plan.success ? "" : " FAILED");
+                    if (slack > 0.05)  // which group: corridor, movers, ahead, behind, grip, headway
+                        for (double g : c.plan.slack_max) std::printf(" %.2f", g);
                 }
                 for (const auto& n : d.notes) std::printf(" [%s]", n.c_str());
                 std::printf("\n");
@@ -323,10 +340,13 @@ Result run(const Scenario& sc, const VehicleParams& p, const Body& body, const s
             x += dt_plant * v * std::cos(psi + beta);
             y += dt_plant * v * std::sin(psi + beta);
             psi += dt_plant * v * std::cos(beta) * std::tan(delta) / L;
-            v = std::max(0.0, v + dt_plant * a);
+            if (reversing) v = std::max(-1.5, v - dt_plant * 1.0), a = 0.0;  // in reverse, slowly, steered along the lane
+            else if (v < 0.0) v = std::min(0.0, v + dt_plant * 3.0), a = 0.0;  // braked to rest before the plan is driven
+            else v = std::max(0.0, v + dt_plant * a);
             if (v == 0.0 && a < 0.0) a = 0.0;  // brakes hold a car at standstill, they do not reverse it
             a += dt_plant * (a_cmd - a) / tau_a;
-            const double rate = std::clamp((d_cmd - delta) / tau_d, -p.delta_rate_max, p.delta_rate_max);
+            const double d_to = reversing ? reverse_delta : v < 0.0 ? 0.0 : d_cmd;
+            const double rate = std::clamp((d_to - delta) / tau_d, -p.delta_rate_max, p.delta_rate_max);
             delta = std::clamp(delta + dt_plant * rate, -p.delta_max, p.delta_max);
         }
     }
@@ -449,6 +469,123 @@ std::vector<Scenario> scenarios(const Body& body) {
         sc.actors.push_back({"oncoming", 4.8, 2.0, [oncoming_s](double t) { return constant(oncoming_s, LANE, M_PI, -8.0, 0.0, t); }});
         sc.road_hi = 1.5 * LANE;
         sc.goal = reach(100.0, 25.0);
+        out.push_back(sc);
+    }
+    // The same, SimLingo asking to go round from the start: decided at once. Clear: out into the oncoming lane at
+    // once, never slowing; not clear: stopped far back (where the car sees furthest past the parked car), then round.
+    for (double oncoming_s : {220.0, 110.0}) {
+        const bool clear = oncoming_s > 150.0;
+        Scenario sc{clear ? "asked_overtake_go" : "asked_overtake_stop", straight(), 8.0, 8.3, 25.0};
+        sc.lanes = {two_way};
+        sc.asks_change = 1;
+        sc.actors.push_back({"parked", 4.8, 2.0, [](double t) { return constant(55.0, 0.0, 0.0, 0.0, 0.0, t); }, 0.0,
+                             Actor::vehicle, true});
+        sc.actors.push_back({"oncoming", 4.8, 2.0, [oncoming_s](double t) { return constant(oncoming_s, LANE, M_PI, -8.0, 0.0, t); }});
+        sc.road_hi = 1.5 * LANE;
+        const double parked_rear = 55.0 - 2.4;
+        sc.goal = [clear, parked_rear, front](const std::vector<std::array<double, 8>>& tr) -> std::string {
+            const std::string reached = reach(100.0, clear ? 15.0 : 25.0)(tr);
+            if (!reached.empty()) return reached;
+            double v_min = INF, s_rest = -INF;
+            for (const auto& r : tr) {
+                v_min = std::min(v_min, r[3]);
+                if (r[3] < 0.1 && s_rest == -INF) s_rest = r[1];
+            }
+            char buf[96];
+            if (clear && v_min < 6.0) {  // out at once, at speed, never slowing to decide
+                std::snprintf(buf, sizeof buf, "slowed to %.1f m/s on a clear overtake", v_min);
+                return buf;
+            }
+            if (!clear && (s_rest == -INF || parked_rear - (s_rest + front) < 20.0)) {  // stopped far back
+                std::snprintf(buf, sizeof buf, "came to rest %.1f m behind the parked car (not far back)",
+                              s_rest == -INF ? -1.0 : parked_rear - (s_rest + front));
+                return buf;
+            }
+            return "";
+        };
+        out.push_back(sc);
+    }
+    {  // Bench2Drive route 4: a sign as wide as the lane hides the oncoming lane beyond it. SimLingo asks to go
+       // round; the lane is not seen far enough, so the car stops, backs up, edges over to the left of its lane to
+       // see past the sign, and goes round once it does.
+        Scenario sc{"peek_to_see", straight(), 8.0, 8.3, 45.0};
+        sc.lanes = {two_way};
+        sc.asks_change = 1;
+        const double sign_s = 55.0, sign_half = 1.45;
+        sc.actors.push_back({"sign", 2.4, 2.0 * sign_half, [sign_s](double t) { return constant(sign_s, 0.0, 0.0, 0.0, 0.0, t); },
+                             0.0, Actor::vehicle, true});
+        sc.road_hi = 1.5 * LANE;
+        sc.sight_left = [sign_s, sign_half](double s, double e) {  // to the lane's centre, past the sign's near corner
+            const double d = sign_s - 1.2 - s;
+            if (d <= 0.0 || e >= sign_half - 0.05) return 150.0;
+            return std::min(150.0, d * (LANE - e) / (sign_half - e));
+        };
+        sc.goal = [](const std::vector<std::array<double, 8>>& tr) -> std::string {
+            const std::string reached = reach(100.0, 45.0)(tr);
+            if (!reached.empty()) return reached;
+            const bool backed = std::any_of(tr.begin(), tr.end(), [](const auto& r) { return r[3] < -0.5; });
+            return backed ? "" : "went round without backing up to see";
+        };
+        out.push_back(sc);
+    }
+    {  // Bench2Drive route 8: a stream at 13 m/s, a car every 25 m, comes in from the right at s = 60 m and goes on
+       // down the lane, never slowing. Waiting for a break in it is waiting for good: the car goes in between two.
+        Scenario sc{"merge_into_stream", straight(), 5.0, 13.9, 25.0};
+        for (int i = -4; i < 16; ++i) {
+            const double t_in = 0.6 + i * 25.0 / 13.0;
+            Scripted car{"stream", 4.7, 1.9, [t_in](double t) -> Motion {
+                             if (t < t_in) return {60.0, -13.0 * (t_in - t), M_PI_2, 0.0, 13.0, 0.0};
+                             return {60.0 + 13.0 * (t - t_in), 0.0, 0.0, 13.0, 0.0, 0.0};
+                         }};
+            car.known = true;
+            sc.actors.push_back(car);
+        }
+        sc.road_lo = -200.0;  // the side road
+        sc.goal = reach(150.0, 25.0);
+        out.push_back(sc);
+    }
+    // Route 8's junction lane alone: from rest 10 m before a right turn of 12.5 m radius, no traffic, the lane
+    // 2.8 m wide (as the map gives it through the junction), 3.5 m, 5 m. How fast does the plan take the bend?
+    for (double w : {2.8, 3.5, 5.0}) {
+        const double r = 12.5, arc = 0.5 * M_PI * r;
+        char name[40];
+        std::snprintf(name, sizeof name, "tight_turn_%.1f", w);
+        Scenario sc{name, Path::from_pieces({0.0, 0.0, 0.0}, {10.0, arc, 150.0}, {0.0, -1.0 / r, 0.0}, false), 0.0, 13.9, 8.0};
+        sc.lanes = {LaneSection{0.0, INF, -0.5 * w, 0.5 * w, 0.0, false, false, -0.5 * w, 0.5 * w}};
+        sc.road_lo = -0.5 * w, sc.road_hi = 0.5 * w;
+        sc.goal = [arc](const std::vector<std::array<double, 8>>& tr) -> std::string {
+            double v_bend = 0.0, t_out = -1.0, e_max = 0.0;
+            for (const auto& q : tr) {
+                if (q[1] > 10.0 && q[1] < 10.0 + arc) v_bend = std::max(v_bend, q[3]), e_max = std::max(e_max, std::fabs(q[2]));
+                if (t_out < 0.0 && q[1] >= 10.0 + arc) t_out = q[0];
+            }
+            char buf[120];
+            std::snprintf(buf, sizeof buf, "info: out of the bend at %.1f s, top speed in it %.1f m/s, |e| up to %.2f m", t_out, v_bend, e_max);
+            return buf;
+        };
+        out.push_back(sc);
+    }
+    // Route 8 after the light: from rest, the entry 15 m ahead (the run-up merge.cpp waits back for), the stream at
+    // four phases of its 1.9 s period. The car is to go in between two of them, 1 m behind the one it follows.
+    for (int phase = 0; phase < 8; ++phase) {
+        // phases 4-7: through a right turn of 12.5 m radius (route 8's junction lane) that the stream comes in at the end of
+        const bool turn = phase >= 4;
+        const double r = 12.5, arc = 0.5 * M_PI * r;
+        Scenario sc{(turn ? "merge_turn_from_rest_" : "merge_from_rest_") + std::to_string(phase % 4),
+                    turn ? Path::from_pieces({0.0, 0.0, 0.0}, {20.0, arc, 150.0}, {0.0, -1.0 / r, 0.0}, false) : straight(),
+                    0.0, 13.9, 25.0};
+        const double s_in = turn ? 20.0 + arc : 20.0;
+        for (int i = -4; i < 16; ++i) {
+            const double t_in = 0.3 + 0.48 * (phase % 4) + i * 25.0 / 13.0;
+            Scripted car{"stream", 4.7, 1.9, [t_in, s_in](double t) -> Motion {
+                             if (t < t_in) return {s_in, -13.0 * (t_in - t), M_PI_2, 0.0, 13.0, 0.0};
+                             return {s_in + 13.0 * (t - t_in), 0.0, 0.0, 13.0, 0.0, 0.0};
+                         }};
+            car.known = true;
+            sc.actors.push_back(car);
+        }
+        sc.road_lo = -200.0;
+        sc.goal = reach(110.0, 25.0);
         out.push_back(sc);
     }
     {  // a car crosses at a junction at s = 45 m, arriving as the car would
