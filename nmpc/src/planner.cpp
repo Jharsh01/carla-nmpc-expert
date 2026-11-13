@@ -13,6 +13,7 @@ struct Planner::Impl {
     std::vector<std::unique_ptr<UrbanNMPC>> pool;
     std::vector<std::string> slot_label;
     std::string last_label;
+    bool keep_lane = false;
 };
 
 Planner::Planner(Path route_, VehicleParams params, Body body_, UrbanNMPC::Options nmpc_options, Options o)
@@ -44,6 +45,7 @@ void Planner::reset() {
     for (auto& n : m.pool) n->reset();
     std::fill(m.slot_label.begin(), m.slot_label.end(), "");
     m.last_label.clear();
+    m.keep_lane = false;
     m.constraints.reset();
 }
 
@@ -60,7 +62,11 @@ Decision Planner::step(const Scene& sc) {
 
     // ---- perceive the scene (the middle layer), and build the candidates from it
 
-    const Percept p = m.perception.perceive(sc, route, m.pool[0]->path_state(sc.ego));
+    Percept p = m.perception.perceive(sc, route, m.pool[0]->path_state(sc.ego));
+    if (m.constraints.opt.ignore_mergers) {  // the stream is not yielded to (ConstraintOptions::ignore_mergers)
+        if (!p.mergers.empty()) p.notes.push_back("mergers ignored");
+        p.mergers.clear(), p.joining.clear();
+    }
     Constraints::Result built = m.constraints.build(p, sc, m.last_label);
     out.notes = p.notes;
     out.notes.insert(out.notes.end(), built.notes.begin(), built.notes.end());
@@ -86,9 +92,21 @@ Decision Planner::step(const Scene& sc) {
                     break;
                 }
     std::vector<std::thread> threads;
-    for (size_t i = 1; i < cands.size(); ++i)
-        threads.emplace_back([&, i] { cands[i].plan = m.pool[slot_of[i]]->solve(cands[i].problem); });
-    cands[0].plan = m.pool[slot_of[0]]->solve(cands[0].problem);
+    auto solve = [&](size_t i) {
+        Candidate& c = cands[i];
+        if (!c.hopeless) {
+            c.plan = m.pool[slot_of[i]]->solve(c.problem);
+            return;
+        }
+        c.plan.status = "not solved: hopeless";  // a plan's shape, for the log; never chosen
+        c.plan.times.assign(nmpc.N + 1, 0.0);
+        c.plan.x = Eigen::MatrixXd::Zero(nmpc.N + 1, NX);
+        c.plan.u = Eigen::MatrixXd::Zero(nmpc.N, NU);
+        c.plan.slack_max.assign(UrbanNMPC::groups().size(), 1e9);
+        m.pool[slot_of[i]]->reset();
+    };
+    for (size_t i = 1; i < cands.size(); ++i) threads.emplace_back([&, i] { solve(i); });
+    solve(0);
     for (auto& th : threads) th.join();
 
     // ---- choose: the cheapest of those within their constraints, the last choice favoured
@@ -114,6 +132,7 @@ Decision Planner::step(const Scene& sc) {
     int best = -1, best_rank = -1;
     for (size_t i = 0; i < cands.size(); ++i) {
         Candidate& c = cands[i];
+        if (c.hopeless) continue;
         // within the hard constraints (the headway, the last group, is spacing, not contact)
         const double slack = *std::max_element(c.plan.slack_max.begin(), c.plan.slack_max.end() - 1);
         const bool ok = slack <= opt.slack_ok;
@@ -145,10 +164,30 @@ Decision Planner::step(const Scene& sc) {
         best = static_cast<int>(i);
         out.notes.push_back("borrow: SimLingo asks and it is clear, going round now");
     }
+    // into a stream, judged clear (constraint/merge): gone into now. Waiting scores no worse while the plan is still
+    // on its way to the entry, and the gap is gone a second later.
+    for (size_t i = 0; i < cands.size() && !built.merge.empty(); ++i) {
+        const Candidate& c = cands[i];
+        if (c.label != built.merge || !c.plan.success || static_cast<int>(i) == best) continue;
+        if (*std::max_element(c.plan.slack_max.begin(), c.plan.slack_max.end() - 1) > opt.slack_ok && !cands[0].hopeless) continue;
+        best = static_cast<int>(i);
+        out.notes.push_back("merge: going in");
+    }
+    // across a stream, judged clear (constraint/crossing: cross): gone across now, as for a merge
+    for (size_t i = 0; i < cands.size() && !built.cross.empty(); ++i) {
+        const Candidate& c = cands[i];
+        if (c.label != built.cross || !c.plan.success || static_cast<int>(i) == best) continue;
+        if (*std::max_element(c.plan.slack_max.begin(), c.plan.slack_max.end() - 1) > opt.slack_ok && !cands[0].hopeless) continue;
+        best = static_cast<int>(i);
+        out.notes.push_back("cross: going across");
+    }
     out.label = cands[best].label;
     out.plan = cands[best].plan;
     if (out.label != m.last_label && !m.last_label.empty()) out.notes.push_back("switched from " + m.last_label + " to " + out.label);
     m.last_label = out.label;
+    out.reverse = built.reverse;
+    out.reverse_delta = built.reverse_delta;
+    out.keep_lane = m.keep_lane = built.peeking || (m.keep_lane && out.label.rfind("borrow_", 0) == 0);
     out.candidates = std::move(cands);
     out.wall_time = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     return out;

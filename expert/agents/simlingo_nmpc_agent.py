@@ -60,6 +60,8 @@ DT = 0.05  # [s] a tick
 PLAN_EVERY = 4  # ticks between plans (5 Hz)
 NMPC_LATENCY = 1  # ticks from a plan's scene to its use: the NMPC has 50 ms, as it would in a car
 SIMLINGO_EVERY = 10  # ticks between SimLingo's predictions (2 Hz)
+REVERSE_SPEED = 1.5  # [m/s] backing up to see past a blocker
+REVERSE_THROTTLE = 0.4
 LOOK_RANGE = 150.0  # [m] the world model reports vehicles this far off (and in line of sight)
 SIMLINGO_LATENCY = 6  # ticks from SimLingo's camera frame to its prediction's use: on its own core of an L4
                       # machine it takes 290 ms (60 preprocessing, 230 the model), so 300 ms would hold in real time
@@ -132,6 +134,41 @@ class _Worker:
         self.conn.close()
 
 
+def _problem_record(t, pr, path, decision):
+    """The chosen candidate's problem as the NMPC got it, with its path and plan: enough to solve it again offline
+    (scripts/replay_problem.py), to see which row holds a plan (route 8's merges crawl where the drive they were judged
+    on goes; todo 0T0 a2). Not rounded: a replay should match."""
+    f = lambda xs: [float(v) for v in xs]
+    return {"t": t, "label": decision.label,
+            "path": [[float(q.x), float(q.y)] for q in path.piece_poses] + [[float(q.x), float(q.y)] for q in [path.pose(path.length)]],
+            "ego": [pr.ego.x, pr.ego.y, pr.ego.psi, pr.ego.v, pr.ego.a, pr.ego.delta],
+            "corridor": [f(pr.corridor.s), f(pr.corridor.lo), f(pr.corridor.hi), f(pr.corridor.ref)],
+            "v_max": pr.v_max, "v_ref_t": f(pr.v_ref_t), "v_ref": f(pr.v_ref),
+            "movers": [[f(m.t), f(m.s), f(m.e_y), m.radius, m.growth, m.margin] for m in pr.movers],
+            "leads": [[f(l.t), f(l.s_rear)] for l in pr.leads],
+            "gates": [[g.s, g.t_from, g.t_to, g.before, g.route_end, g.taper] for g in pr.gates],
+            "chasers": [[f(c.t), f(c.s_front), c.t_from] for c in pr.chasers],
+            "a_lat_ref": pr.a_lat_ref, "follow_gap": pr.follow_gap, "follow_time_gap": pr.follow_time_gap,
+            "a_max": pr.a_max, "w_accel": pr.w_accel, "w_lat": pr.w_lat, "pt": pr.t,
+            "plan": {"times": f(decision.plan.times), "x": decision.plan.x.tolist(), "success": bool(decision.plan.success)}}
+
+
+def _scene_record(t, sc, path):
+    """The scene a plan was made from, with its path: enough to run the planner on it again offline
+    (scripts/replay_scene.py), with other options."""
+    f = lambda xs: [float(v) for v in xs]
+    return {"t": t,
+            "path": [[float(q.x), float(q.y)] for q in path.piece_poses] + [[float(q.x), float(q.y)] for q in [path.pose(path.length)]],
+            "ego": [sc.ego.x, sc.ego.y, sc.ego.psi, sc.ego.v, sc.ego.a, sc.ego.delta], "st": sc.t, "v_max": sc.v_max,
+            "v_ref_t": f(sc.v_ref_t), "v_ref": f(sc.v_ref), "line_s": f(sc.line_s), "line_e": f(sc.line_e),
+            "lanes": [[l.s_from, l.s_to, l.lo, l.hi, l.left_width, l.left_oncoming, l.left_allowed, l.road_lo, l.road_hi,
+                       l.right_width, l.right_oncoming, l.right_allowed, l.way_lo, l.way_hi] for l in sc.lanes],
+            "actors": [[a.id, str(a.kind).split(".")[-1], a.length, a.width, a.parked, a.stays_out, f(a.t), f(a.x), f(a.y),
+                        f(a.psi)] for a in sc.actors],
+            "stops": [[st.id, str(st.kind).split(".")[-1], st.s] for st in sc.stops],
+            "sight": [sc.sight_left, sc.sight_right], "asks_change": sc.asks_change}
+
+
 class _Job:
     """A planner step being solved on the NMPC's thread, with the scene it was made from (for the log)."""
 
@@ -152,6 +189,8 @@ class SimLingoNMPCAgent(LingoAgent):
         self.log_file = None
         self.live = None
         self.held = None  # SimLingo's last prediction: speed waypoints, route, words
+        self.reversing = False  # backing up as the planner asked (Decision.reverse), in place of its plan
+        self.speed_signed = 0.0
         self.held_step = 0  # the tick of its camera frame
         self.held_odometry = None  # the car's motion since then
         self.request = None  # (tick, odometry since then) of the prediction being made
@@ -173,10 +212,11 @@ class SimLingoNMPCAgent(LingoAgent):
             compass = float(input_data["imu"][1][-1])
             for odometry in (self.held_odometry, self.request and self.request[1]):
                 if odometry is not None:
-                    odometry.update(speed, compass, DT)
+                    odometry.update(self._travel_speed(speed), compass, DT)
         self._simlingo(input_data, speed, measured, compass)
         steer, throttle, brake = self.control_pid(input_data["imu"][1], speed, timestamp)
-        control = carla.VehicleControl(steer=float(steer), throttle=float(throttle), brake=float(brake))
+        control = carla.VehicleControl(steer=float(steer), throttle=float(throttle), brake=float(brake),
+                                       reverse=bool(self.reversing))
         # CARLA will not let the car drive in the initial frames; braking keeps SimLingo's filter right
         self.control = carla.VehicleControl(0.0, 0.0, 1.0) if self.step < self.config.inital_frames_delay else control
         with timing.stage("run_step.metric"):
@@ -210,6 +250,7 @@ class SimLingoNMPCAgent(LingoAgent):
         if (target_point != self.target_point_prev).all():
             self.target_point_prev = target_point
             self.commands.append(far_command.value)
+        self.speed_signed = float(speed)  # negative backing up
         return max(float(speed), 0.0), dict(state, gps_pos=gps_pos, filtered=filtered, route=route)
 
     def _simlingo(self, input_data, speed, measured, compass):
@@ -240,7 +281,8 @@ class SimLingoNMPCAgent(LingoAgent):
         self.hero = CarlaDataProvider.get_hero_actor()  # for the world model only: where its stand-in sensors are
         carla_map = world.get_map()
         end = self._global_plan_world_coord[-1][0].location
-        self.route = Route(expertctl, carla, world, carla_map, frames.from_carla_xy(end.x, end.y))
+        route_xy = [frames.from_carla_xy(tr.location.x, tr.location.y) for tr, _ in self._global_plan_world_coord]
+        self.route = Route(expertctl, carla, world, carla_map, frames.from_carla_xy(end.x, end.y), route_xy)
         # vehicles reported to LOOK_RANGE: an overtake at 50 km/h needs 100-140 m of oncoming lane seen clear
         self.actors = Actors(expertctl, carla, world, carla_map, self.hero, look_range=LOOK_RANGE)
         self.sight = Sight(carla, world, carla_map, self.hero)
@@ -269,6 +311,10 @@ class SimLingoNMPCAgent(LingoAgent):
             route = os.path.basename(os.environ.get("ROUTES", "route")).replace(".xml", "")
             os.makedirs(os.path.join(save, route), exist_ok=True)
             self.log_file = open(os.path.join(save, route, "nmpc.jsonl"), "w")
+            # the chosen candidate's whole problem each plan, to solve again offline (scripts/replay_problem.py)
+            self.problem_file = open(os.path.join(save, route, "problems.jsonl"), "w")
+            # and the scene it was made from, to run the planner again offline (scripts/replay_scene.py)
+            self.scene_file = open(os.path.join(save, route, "scenes.jsonl"), "w")
         port = os.environ.get("NMPC_LIVE_PORT")
         if port:
             try:
@@ -282,14 +328,44 @@ class SimLingoNMPCAgent(LingoAgent):
     def _path(self, route, frame, ego):
         """The path for this plan and where SimLingo's part of it ends: the lane the car is in, unless SimLingo's path
         leaves it. `route`: SimLingo's path in the car's frame now (y right)."""
+        self.on_turn = False
         lane = self.route.lane_path(frame)
         if lane is not None:
             s_now = lane.project(ego.x, ego.y)[0]
             points = [lane.project(float(x), float(-y)) for x, y in route]
             self.intent.update([p[0] - s_now for p in points], [p[1] for p in points])
-            if not self.intent.manoeuvre:
+            # the lane's path too while the planner is peeking past a blocker and going round from there: its
+            # lanes, its room behind and the line it edges out to are the lane's, not those of a line that leaves it
+            if not self.intent.manoeuvre or (self.decision is not None and self.decision.keep_lane):
                 return lane, points[-1][0]
-        return self.route.path(simlingo_ref.path_points(route), frame)
+        points = simlingo_ref.path_points(route)
+        # a turn at a junction: the junction lane SimLingo's line follows, as the map has it (the same from plan to
+        # plan, and the junction's geometry: where its other lanes cross and merge is read along it)
+        turn = self.route.turn_path(points, frame)
+        if turn is not None:
+            self.on_turn = True
+            return turn, turn.project(*points[-1])[0]
+        return self.route.path(points, frame)
+
+    def _travel_speed(self, speed):
+        """The speed the odometry carries the car on at: the speedometer's, signed while backing up."""
+        return self.speed_signed if self.reversing else speed
+
+    def _reverse(self):
+        """Backing up as the planner asks (Decision.reverse: stopped to see past a blocker, it sees too little): the
+        NMPC plans forwards only, so this is driven here, back along the lane (Decision.reverse_delta) at REVERSE_SPEED
+        while it is asked for, then braked to rest. (steer, throttle, brake), or None when the plan is to be driven."""
+        asked = self.decision.reverse > 0.3
+        if asked and not self.reversing and abs(self.speed_signed) < 0.3:
+            self.reversing = True
+        if not self.reversing:
+            return None
+        if asked:
+            steer = float(np.clip(self.decision.reverse_delta / self.actuation.gain(0.0), -1.0, 1.0))
+            return steer, (REVERSE_THROTTLE if self.speed_signed > -REVERSE_SPEED else 0.0), 0.0
+        if abs(self.speed_signed) < 0.1:
+            self.reversing = False
+        return 0.0, 0.0, 0.6
 
     def _plan_at(self, tau, i):
         return float(np.interp(tau, self.plan.times, self.plan.x[:, i]))
@@ -301,7 +377,7 @@ class SimLingoNMPCAgent(LingoAgent):
         if not self.started:
             self._start()
         route = simlingo_ref.carry(self.held[1], self.held_odometry.pose())
-        self.odometry.update(speed, float(imu[-1]), DT)
+        self.odometry.update(self._travel_speed(speed), float(imu[-1]), DT)
         self.a_filtered += 0.3 * (float(imu[0]) - self.a_filtered)
         delta = self.actuation.delta_of(self.steer, speed)
         # the acceleration within the model's bounds: the MKZ's brake under 6.5 m/s reaches 20 m/s^2 (todo 2b), a
@@ -317,8 +393,20 @@ class SimLingoNMPCAgent(LingoAgent):
                 path, s_simlingo = self._path(route, frame, ego)
             with timing.stage("nmpc.set_route"):  # the first: the solver's set-up (and compile, on a fresh cache)
                 if self.planner is None:
-                    self.planner = expertctl.Planner(path, self.params, self.body, self.nmpc_options,
-                                                     expertctl.PlannerOptions())
+                    options = expertctl.PlannerOptions()
+                    # a trial (12 Nov): 5 m kept to oncoming traffic at the end of a pass, not 20. Route 4 sees
+                    # 106 m from its peek and the pass needs 117 m with 20; ONCOMING_GAP=<m> sets another
+                    options.oncoming_gap = float(os.environ.get("ONCOMING_GAP", 5.0))
+                    # a trial (12 Nov): expect a stream car the ego merges ahead of to brake at this [m/s^2]
+                    options.merge_chaser_brake = float(os.environ.get("MERGE_CHASER_BRAKE", 0.0))
+                    # a trial (13 Nov): kept between the ego's rear and a stream car it goes in ahead of [m] (core: 2).
+                    # From rest 15 m back, route 8's gaps give 2.3-2.9 m at best
+                    # a trial (13 Nov): turn into a stream without yielding to it; MERGE_IGNORE=1. Route 8: crept
+                    # in at 1-3 m/s among the stream's cars (still kept clear of) and was hit (nomerge_r8)
+                    options.ignore_mergers = os.environ.get("MERGE_IGNORE", "0") == "1"
+                    if "MERGE_GAP" in os.environ:
+                        options.merge_gap = float(os.environ["MERGE_GAP"])
+                    self.planner = expertctl.Planner(path, self.params, self.body, self.nmpc_options, options)
                     self.odometry.old_frame()
                 else:
                     self.planner.set_route(path, expertctl.Pose(*self.odometry.old_frame()))
@@ -374,21 +462,44 @@ class SimLingoNMPCAgent(LingoAgent):
             a_ref = min(a_ref, -1.0)  # planned at rest: hold the brake
         a_ref = min(a_ref, self.hold.a_limit(t))
         throttle, brake, steer = self.actuation.command(a_ref, delta_ref, speed, self.a_filtered)
+        backing = self._reverse()
+        if backing is not None:
+            steer, throttle, brake = backing
+            self.delta_command = 0.0
         self.steer = steer
         if self.log_file is not None:
             row = {"t": round(t, 3), "v": speed, "a": self.a_filtered, "a_ref": a_ref, "delta_ref": delta_ref,
                    "throttle": throttle, "brake": brake, "steer": steer, "label": self.decision.label,
                    "step_ms": 1e3 * self.decision.wall_time if job else 0.0, "success": self.decision.plan.success,
-                   "holding": self.hold.failed_since is not None,
+                   "holding": self.hold.failed_since is not None, "reverse": self.reversing, "on_turn": getattr(self, "on_turn", False),
                    "n_actors": len(self.actors.tracks), "notes": list(self.decision.notes) if job else []}
             true = frames.Frame.of(self.hero.get_transform())
             row["pose"] = [round(true.x, 3), round(true.y, 3), round(true.psi, 5)]  # for the video and analysis only
             row["held"] = [self.held_step, *(round(v, 3) for v in self.held_odometry.pose())]
             if job:  # a new plan: the scene it was made from, at its time (t_plan)
-                # each candidate: label, solved, largest slack but the headway's, how far it gets [m], score
+                # each candidate: label, solved, largest slack but the headway's, how far it gets [m], score, each slack
                 row["candidates"] = [[c.label, bool(c.plan.success), round(float(max(c.plan.slack_max[:-1])), 3),
-                                      round(float(c.plan.x[-1][0] - c.plan.x[0][0]), 1), round(float(c.score), 1)]
+                                      round(float(c.plan.x[-1][0] - c.plan.x[0][0]), 1), round(float(c.score), 1),
+                                      [round(float(v), 2) for v in c.plan.slack_max]]  # by group (UrbanNMPC.groups)
                                      for c in self.decision.candidates]
+                # the chosen plan's speed and acceleration at each step, and what its candidate asked for: the speed
+                # (v_ref, every 0.5 s), its v_max, and its gates (s from the car now, t_to): to see what holds a plan
+                pl = self.decision.plan
+                row["plan_tva"] = [[round(float(t), 2), round(float(x[3]), 2), round(float(x[4]), 2)]
+                                   for t, x in zip(pl.times, pl.x)]
+                for c in self.decision.candidates:
+                    if c.label == self.decision.label:
+                        pr = c.problem
+                        vt, vr = list(pr.v_ref_t), list(pr.v_ref)
+                        row["asked"] = {"v_max": round(float(pr.v_max), 2),
+                                        "v_ref": [[round(t, 1), round(v, 2)] for t, v in zip(vt, vr)][::5],
+                                        "gates": [[round(g.s - job.s_now, 1), round(g.t_from, 2),
+                                                   round(g.t_to, 2) if math.isfinite(g.t_to) else None, bool(g.before)]
+                                                  for g in pr.gates],
+                                        "leads": [[round(l.s_rear[0] - job.s_now, 1), round(l.s_rear[-1] - job.s_now, 1)]
+                                                  for l in pr.leads if l.s_rear]}
+                        self.problem_file.write(json.dumps(_problem_record(job.t, pr, job.path, self.decision)) + "\n")
+                self.scene_file.write(json.dumps(_scene_record(job.t, job.scene, job.path)) + "\n")
                 row.update(self._describe(job.scene, job.path, job.s_now, job.s_simlingo))
                 row.update(self._geometry(job))
             self.log_file.write(json.dumps(row) + "\n")
@@ -448,6 +559,8 @@ class SimLingoNMPCAgent(LingoAgent):
         if self.log_file is not None:
             self.log_file.close()
             self.log_file = None
+            self.problem_file.close()
+            self.scene_file.close()
         if self.live is not None:
             self.live.close()
             self.live = None

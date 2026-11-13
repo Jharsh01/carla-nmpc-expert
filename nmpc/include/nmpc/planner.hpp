@@ -29,6 +29,12 @@ struct Decision {
     std::vector<Candidate> candidates;
     double wall_time = 0.0;  // for the whole step [s]
     std::vector<std::string> notes;  // classification and rule events, for the log
+    // Back up this far now [m] (0: drive the plan): the car is stopped to see past a blocker and sees too little
+    // (Constraints, peeking). The NMPC does not reverse; whoever drives the plan does this instead, slowly, straight.
+    double reverse = 0.0;
+    double reverse_delta = 0.0;  // the road-wheel angle to back up with [rad]
+    // Plan along the lane's own path next time, not a line that leaves it: peeking, and the way round that follows
+    bool keep_lane = false;
 };
 
 // Whether a line asked for (SimLingo's path) is a manoeuvre: a lane change or a turn. Given as offsets from the lane

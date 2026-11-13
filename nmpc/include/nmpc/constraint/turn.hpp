@@ -7,6 +7,6 @@
 namespace ex {
 
 // The speed asked for v in a bend of curvature kappa [1/m].
-double bend_speed(double v, double kappa, const NmpcOptions& opt);
+double bend_speed(double v, double kappa, double a_lat_ref);
 
 }  // namespace ex

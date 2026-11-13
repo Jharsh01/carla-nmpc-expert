@@ -167,3 +167,29 @@ def test_a_car_in_a_junction_or_crossing_is_not_left_out():
 
 def test_a_parked_car_is_left_as_it_is():
     assert not _intent(-3.2, vx=0.0, parked=True)
+
+
+def _still_cars(xs, since=0.0):
+    """Cars at rest along x in one lane, as Actors tracks them, and the Actors to ask `_parked` of."""
+    from types import SimpleNamespace as NS
+    lane = NS(Driving=1, Any=2)
+    wp = NS(lane_type=lane.Driving, lane_width=3.5, transform=NS(location=NS(distance=lambda loc: 0.0)))
+    carla = NS(VehicleLightState=NS(LeftBlinker=1, RightBlinker=2), LaneType=lane)
+    tracks = {}
+    for i, x in enumerate(xs):
+        actor = NS(get_light_state=lambda: 0, get_location=lambda: None, is_at_traffic_light=lambda: False)
+        tracks[i] = NS(mesh_car=False, kind="vehicle", still_since=since, actor=actor, history=[(0.0, x, 0.0, 0.0)],
+                       length=4.8)
+    world = NS(carla=carla, map=NS(get_waypoint=lambda *a, **k: wp), tracks=tracks)
+    world._parked = lambda track, t, behind=(): Actors._parked(world, track, t, behind)
+    return world, tracks
+
+
+def test_cars_at_rest_in_a_row_behind_a_parked_car_are_parked_too():
+    """Bench2Drive route 6: three accident cars 6-10 m apart. The front one has nothing ahead; the two behind it are
+    held up only by cars that are themselves parked. A queue at something not parked (still for under 4 s) waits."""
+    world, tracks = _still_cars([0.0, 10.0, 16.0])
+    assert all(world._parked(track, 10.0) for track in tracks.values())
+    world, tracks = _still_cars([0.0, 10.0, 16.0])
+    tracks[2].still_since = 8.0  # the front car has only just stopped: traffic
+    assert not any(world._parked(track, 10.0) for track in tracks.values())

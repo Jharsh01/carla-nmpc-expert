@@ -1,20 +1,54 @@
 # To do
 
 Open work, most pressing first. When a task is done, delete it here and, if it taught something, add that to
-[learnings.md](learnings.md). Last updated 9 November 2026, on lane-band-worker-timing. Latest report:
-[reports/2026-11-01-lane-keeping-and-traffic](reports/2026-11-01-lane-keeping-and-traffic/README.md).
+[learnings.md](learnings.md). Last updated 13 November 2026, on lane-band-worker-timing. Latest report:
+[reports/2026-11-12-overtakes-and-turns](reports/2026-11-12-overtakes-and-turns/README.md).
 
-## Now: routes 0 and 1 drive; the car does not get through traffic on routes 8 and 10
+## Now: routes 0, 1, 4, 6 and 8 drive; route 10 does not get through its stream
 
-0. **Re-run routes 4, 6, 8, 10 with the lanes either side** (10 Nov): borrow_right, the lane-our-way check and
-   "room beside it" are new and only routes 0 and 1 have run with them. Watch for a parked car beside a two-lane band
-   being driven past too close, and for borrow_right on the wrong side of the road where the map's right lane is
-   oncoming (left-hand traffic).
+0. **The lanes either side on routes 4, 6, 8, 10: run, 13 Nov (jslack_*: 100, 100, 100, 35.5 %).** Not yet
+   looked at in the logs: a parked car beside a two-lane band passed too close, borrow_right where the map's right
+   lane is oncoming (left-hand traffic).
 0b. **The band's lo/hi mix frames during a lane change** (`Route.lanes`, middle_layer/perception/sensors/map.py, found 10 Nov): the merge takes min/max of
    offsets measured across the path at other rows, where the path is elsewhere. Half way into the next lane the band's
    far edge is clipped (a straight two-way test: our lane at [-3.9, -0.9] across the path, the band [-3.0, 2.2]).
    `way_lo/way_hi` are now cut at the row itself (`Route._cuts`); do the same for lo/hi.
 
+0T0. **Route 8 finishes (13 Nov, jslack_r8: 100 %, no infractions, in at green, done at 16.3 s; PDM-Lite 11.3 s).**
+    One run so far; repeat it. What did it (learnings.md, "Route 8's merge plans crawled"): the band in a junction is
+    now the lane's width and `JUNCTION_SLACK` 0.4 m either side (map.py). Before, it was the lane alone (+-1.4 m),
+    the car's ends had +-0.23 m through the bend, and the merge plans slowed to 2-3 m/s and lost each gap. Found with
+    `problems.jsonl` (the chosen problem whole, each plan) and `scripts/replay_problem.py` (re-solves it, also
+    without each kind of row). With it, in the working tree and not committed: the lane path takes the route's branch
+    at junctions, `joining` fix, samples past the path's end ignored, 8 s lane tracks, `merge_gap` 2 /
+    `merge_lead_gap` 1 / `merge_lag` 0, `merge_a_lat` 8.5, `v_top` limit + overtake_over_limit, full throttle in
+    merges, roll-through gates, the lead-speed fix (learnings.md).
+    Re-run with all of it: route 0 100 %, 1 100 %, 4 100 %, 10 35.5 % (as before: item 0T), route 6 100 % (jslack_r0..r10, one run each).
+    Left:
+    a. **Is 0.4 m right in every junction?** It applies to straight-through junctions too, and on the inside of a
+       turn the kerb can be nearer than the lane's edge plus 0.4. Not seen yet; watch the turns on routes 0-21.
+    b. **A 0.1-0.2 m bump in the lane path where the straight joins the junction branch** (kappa +0.11 then -0.15
+       within 2 m, route 8). Smoothing it helped some replayed plans; not fixed.
+    c. Trial options to keep or drop: `ignore_mergers` (MERGE_IGNORE), MERGE_GAP, MERGE_CHASER_BRAKE.
+       Offline: `merge_turn_from_rest_*` is not a valid test (cars beside the bend project ambiguously): remove or fix.
+    d. **Use the red phase** (not needed for route 8 now): creep so as to be rolling at the line when green comes.
+0T. **Route 10: a left turn across a 10 m/s stream, stopped part way 13 Nov (learnings.md "Route 10").** Still
+    35-41 % (watchdog, no collisions) in cross_r10 .. cross5_r10. Done, not committed before this: oncoming cars that
+    leave the lane sideways are crossers, not leads (classify.cpp); cross-road cars slow near their stop sign are
+    predicted to stop there (actors.py STOP_*); `cross()` in crossing.cpp (gap judged box against box per moment,
+    PDM-Lite's launch, the drive asked for, commitment), `cross_buffer` 0.1, `cross_side`, `cross_slow_*`; light
+    w_accel/w_lat in cross problems (Problem::w_accel, w_lat); `junction_slack` moved from map.py's band to the
+    corridor (lane.cpp). **Route 8 not re-run since the slack moved: re-run it first.** Routes 0, 1, 4, 6 not re-run
+    with any route 10 change. Next: read cross5_r10 (the first run with the light weights): does the plan now keep up
+    with the judged drive, and are gaps kept. Tools: scenes.jsonl + scripts/replay_scene.py.
+0000. **Route 4 finishes with `oncoming_gap` 5 m in the agent (12 Nov, one run), about 0.3 s clear of the next car.**
+    Decide whether to keep 5 m. Run twice now (100 % both), route 6 once (100 %); routes 0 and 1 not yet run with
+    any of the 12 Nov changes. The return to the lane after a pass at 13 m/s is abrupt (0.3 rad).
+000. **Route 4 after backing up and peeking (12 Nov, learnings.md): sight 106 m, the pass needs about 117 m.** To
+    decide: the margins the clear check keeps (`oncoming_gap` 20 m, an unseen car at the limit at the edge of sight,
+    `done`), or a way to see further (what caps sight at about 106 m is not known: save a depth frame at the peek).
+    The flow's cars appear about 103 m ahead, so no check asking for more than that of seen traffic can pass. Also
+    not run since: routes 0, 1, 6 (overtakes now go 20 km/h over the limit and come back further on).
 00. **Route 4: the overtake is planned along SimLingo's kinked path** (results/bench2drive/r4_left_near, 9 Nov, 28.8 %;
     learnings.md). From rest SimLingo's path jumps 2 m left within 3 m (heading 30-39 deg) onto its line through the gap,
     so the car, pointing down the road, is 30-39 deg off the path and its ends swing about 1.2 m across: in a 2.9 m gap

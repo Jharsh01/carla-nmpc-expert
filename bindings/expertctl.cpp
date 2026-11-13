@@ -104,7 +104,18 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("s", &ex::Gate::s)
         .def_readwrite("t_from", &ex::Gate::t_from)
         .def_readwrite("t_to", &ex::Gate::t_to)
-        .def_readwrite("before", &ex::Gate::before);
+        .def_readwrite("before", &ex::Gate::before)
+        .def_readwrite("route_end", &ex::Gate::route_end)
+        .def_readwrite("taper", &ex::Gate::taper);
+
+    py::class_<ex::Chaser>(m, "Chaser")
+        .def(py::init([](std::vector<double> t, std::vector<double> s_front, double t_from) {
+                 return ex::Chaser{std::move(t), std::move(s_front), t_from};
+             }),
+             py::arg("t"), py::arg("s_front"), py::arg("t_from") = 0.0)
+        .def_readwrite("t", &ex::Chaser::t)
+        .def_readwrite("s_front", &ex::Chaser::s_front)
+        .def_readwrite("t_from", &ex::Chaser::t_from);
 
     py::class_<ex::Problem>(m, "Problem")
         .def(py::init<>())
@@ -116,7 +127,14 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("v_ref", &ex::Problem::v_ref)
         .def_readwrite("movers", &ex::Problem::movers)
         .def_readwrite("leads", &ex::Problem::leads)
-        .def_readwrite("gates", &ex::Problem::gates);
+        .def_readwrite("gates", &ex::Problem::gates)
+        .def_readwrite("a_max", &ex::Problem::a_max)
+        .def_readwrite("follow_gap", &ex::Problem::follow_gap)
+        .def_readwrite("follow_time_gap", &ex::Problem::follow_time_gap)
+        .def_readwrite("a_lat_ref", &ex::Problem::a_lat_ref)
+        .def_readwrite("w_accel", &ex::Problem::w_accel)
+        .def_readwrite("w_lat", &ex::Problem::w_lat)
+        .def_readwrite("chasers", &ex::Problem::chasers);
 
     py::class_<ex::Plan>(m, "Plan", "x: [s, e_y, e_psi, v, a, delta] per step, u: [jerk, delta_rate] per step")
         .def_readonly("times", &ex::Plan::times)
@@ -215,6 +233,16 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("kind", &ex::StopLine::kind)
         .def_readwrite("s", &ex::StopLine::s);
 
+    py::class_<ex::Conflict>(m, "Conflict")
+        .def(py::init([](bool merge, double s_lo, double s_hi, double lead_in, double sight) {
+                 return ex::Conflict{merge, s_lo, s_hi, lead_in, sight};
+             }), py::arg("merge"), py::arg("s_lo"), py::arg("s_hi"), py::arg("lead_in"), py::arg("sight"))
+        .def_readwrite("merge", &ex::Conflict::merge)
+        .def_readwrite("s_lo", &ex::Conflict::s_lo)
+        .def_readwrite("s_hi", &ex::Conflict::s_hi)
+        .def_readwrite("lead_in", &ex::Conflict::lead_in)
+        .def_readwrite("sight", &ex::Conflict::sight);
+
     py::class_<ex::Scene>(m, "Scene")
         .def(py::init<>())
         .def_readwrite("t", &ex::Scene::t)
@@ -229,7 +257,8 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("stops", &ex::Scene::stops)
         .def_readwrite("asks_change", &ex::Scene::asks_change)
         .def_readwrite("sight_left", &ex::Scene::sight_left)
-        .def_readwrite("sight_right", &ex::Scene::sight_right);
+        .def_readwrite("sight_right", &ex::Scene::sight_right)
+        .def_readwrite("conflicts", &ex::Scene::conflicts);
 
     py::class_<ex::Candidate>(m, "Candidate")
         .def_readonly("label", &ex::Candidate::label)
@@ -242,7 +271,10 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readonly("plan", &ex::Decision::plan)
         .def_readonly("candidates", &ex::Decision::candidates)
         .def_readonly("wall_time", &ex::Decision::wall_time)
-        .def_readonly("notes", &ex::Decision::notes);
+        .def_readonly("notes", &ex::Decision::notes)
+        .def_readonly("reverse", &ex::Decision::reverse)
+        .def_readonly("reverse_delta", &ex::Decision::reverse_delta)
+        .def_readonly("keep_lane", &ex::Decision::keep_lane);
 
     using BOpt = ex::Planner::Options;
     py::class_<BOpt> bopt(m, "PlannerOptions");
@@ -251,6 +283,7 @@ PYBIND11_MODULE(expertctl, m) {
     BFIELD(pool); BFIELD(look_ahead); BFIELD(gate_margin); BFIELD(gate_buffer); BFIELD(blocker_range); BFIELD(blocker_overlap); BFIELD(static_margin);
     BFIELD(oncoming_gap); BFIELD(lane_gap); BFIELD(merge_time); BFIELD(pass_progress); BFIELD(stop_hold); BFIELD(dilemma_decel); BFIELD(hysteresis); BFIELD(w_out_of_lane);
     BFIELD(pass_penalty); BFIELD(slack_ok);
+    BFIELD(overtake_over_limit); BFIELD(peek_back); BFIELD(peek_run); BFIELD(peek_over); BFIELD(peek_min_gap); BFIELD(peek_rear_gap); BFIELD(peek_speed); BFIELD(merge_gap); BFIELD(merge_lead_gap); BFIELD(merge_lag); BFIELD(merge_run_up); BFIELD(merge_a_lat); BFIELD(merge_chaser_brake); BFIELD(ignore_mergers); BFIELD(cross_buffer); BFIELD(cross_slow_speed); BFIELD(cross_slow_horizon); BFIELD(cross_side); BFIELD(junction_slack);
 #undef BFIELD
 
     py::class_<ex::PathIntent>(m, "PathIntent")

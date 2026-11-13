@@ -295,6 +295,82 @@ whenever a run, a test or a dead end teaches something not obvious from the code
   plans also have a gate "to inf" (`t_out` is INF when the last prediction sample is in the lane): the stream runs down
   the exit lane, so it is traffic to merge with, but `crossing_kind` reads the direction at t = 0 only and calls it a
   crosser.
+- **Route 8 (13 Nov, five runs, all ~25-36 %, watchdog at 70 s, no infractions): the lane path went straight
+  through the junction, so the stream was known only 3.5 s ahead; and from rest the gaps sit just under the margin.**
+  Runs: runup_r8 (tree as of 12 Nov) 33.2 %; lane8s_r8 (vehicles along lanes predicted 8 s, not 5) 36.3 %;
+  lane8s_end_r8 (+ samples past the path's end ignored, + the `joining` fix) 25.5 %; routebranch_r8 (+ the lane path
+  takes the route's branch at a junction) 33.2 %; gap15_r8 (+ MERGE_GAP=1.5) 25.5 %. Route % depends on where it
+  stood when stopped, so it does not rank these.
+  - Until 6.5 s the planner's path (`Route.lane_path`) ran straight on through the junction, 54 m, where the route
+    turns right; it turned only once SimLingo's line did, ~19 m before. The stream's cars, which run down the lane
+    the route turns into, cannot be mergers on a straight path, whatever the prediction horizon (8 s alone changed
+    nothing). With `continuation` taking the branch whose end is nearest a point of the leaderboard's route, mergers
+    are seen from 2.1 s and the car took a gap rolling at 5 m/s at 4.3 s, as plain SimLingo does.
+  - The ego's light is red until ~8.9 s (stops: `red_light`) and the stream flows through red and green. That
+    rolling gap was during red, so the plan braked for the line and it was dropped. After green, the car is at rest
+    15 m back (`merge_run_up`), and the best gap per stream cycle scores 2.3-2.9 m against `merge_gap` 3 m: the
+    phases repeat, so with 3 m it never goes (runup_r8, routebranch_r8: no merge after green at all).
+  - With `merge_gap` 1.5 m a gap passes once per cycle (~2 s), and each is dropped within 0.2-0.6 s at ~0.1 m/s:
+    the real launch is a few tenths slower than `run` models, and the kept gap's 0.5 m check fails (e.g. 12.95 s
+    "in from 0.0 s", 13.15 s "0.3 m apart"). From rest the timing is too tight to keep a margin through model error.
+  - A bug, fixed: `merge()` counted any drive as clear when `joining` (cars joining behind the ego) was non-empty,
+    even before the entry. A hold after every seen car has no chasers, so it passed, kept the last gap's label, and
+    marked base hopeless: lane8s_r8 at 11.3 s, "merge:3726" holding until 4.8 s, crept to 5 m from the entry and
+    stopped with no run-up. `joining` now counts only past the entry, as `behind` does.
+  - Samples projected past the end of the path are clamped there with e the full distance, so they read as out of
+    the lane: an 8 s track running past the route's end failed "stays in the lane". `classify` and `cos_end` now
+    ignore them.
+  - Backing up for a run-up goes at ~1.4 m/s (v is logged 0 while reversing): 6 m costs ~6 s, three gaps.
+  - Ignoring the stream in the decision only (`ignore_mergers`, nomerge_r8: 50.2 % route, 30.1 score, a collision)
+    is the worst of both: the stream's cars in the junction are still kept clear of and followed, so after green
+    the car crept 16 m at 1-3 m/s over 16 s and was struck at the entry by 3742 at 25.5 s (they never brake).
+  - Merging 1 m behind the car ahead at its speed (follow1_r8, 33.2 %, no infractions; `merge_lead_gap` 1,
+    `merge_lag` 0, Problem::follow_gap 1 m / follow_time_gap 0, `merge_gap` 2): after green a gap is found every
+    1.5-2 s, against none at 3 m. Each is still dropped: at 12.55 s the merge plan crawled ~1.5 m/s for 2 s
+    (a_ref -2.4) while the drive it was judged on went, so the ego came late (0.2 m to the car behind at 13.15 s).
+    Not explained: the log has the actors' summaries, not their tracks, so the scene cannot be rebuilt. Offline,
+    from rest 15 m back on a straight (`merge_from_rest_0..3`, new), all four phases go in, 2.5-3.0 m clear; the
+    turn variants (`merge_turn_from_rest_*`) do not test it: cars beside a 12.5 m bend project ambiguously.
+- **Route 8's merge plans crawled because the band through the junction was too narrow, not because of any car
+  (13 Nov, replaylog_r8, scripts/replay_problem.py).** After green the merge plans began at 5-6 m/s and ~1 s later
+  dipped to 1.6-2.5 m/s mid-horizon (10 m/s asked, the bend allowing ~9), and the gap was lost. Re-solving the
+  logged problems offline with the movers, leads, gates, chasers or speed asked for removed changed nothing;
+  widening the corridor 0.3 m each side took the same plans to 7-8 m/s (12.7 s: from 1.1 m/s, 3.1 -> 5.7 at 2 s).
+  In a junction the band was the lane's width alone, +-1.4 m: with the body 2.04 m (mirrors) and `edge_margin`
+  0.15, the car's ends had +-0.23 m, and to keep its front and rear in that through the bend the NMPC slowed.
+  Smoothing a 0.1-0.2 m left bump in the path just before the turn (kappa +0.11 then -0.15 within 2 m, where the
+  lane's straight joins the junction branch) helped some plans (12.7 s) and not others. The junction band is now
+  the lane's width and `JUNCTION_SLACK` 0.4 m either side (map.py). The run is deterministic: replaylog_r8 matched
+  leadspeed_r8 plan for plan (41.0 % both).
+- **Route 10 (13 Nov, stopped part way; PDM-Lite 100 % in 16 s).** PDM-Lite stops at the stop sign, then goes
+  at full throttle once its own box, rolled 2 s along the route, meets no other car's box rolled 2 s from its
+  controls; 0.05 to 5 m/s in 0.95 s. Ours, found with scripts/replay_scene.py on logged scenes: (1) oncoming cars by
+  the bend read as opposed and became leads coming at the ego, so plans backed off at -1 m/s; (2) the cross-road
+  queue, creeping 2-4 m/s and stopping, was predicted 8 s through the junction just ahead of the ego; (3) with
+  `gate_buffer` 1 s each crosser shut ~2.7 s, the stream comes every 1.5-2.6 s; (4) a crosser's envelope in path
+  coordinates across a slanted crossing spans 5-16 m, so compare boxes per moment instead; (5) with PDM's grown
+  boxes the standing ego already touched cars passing 2-3 m ahead: standing still must not count; (6) gaps free
+  1.0-1.9 s at the line need PDM's launch (ours modelled 0.5 s late at 0.85 a_drive: 5.6 m in 2 s against 11); (7)
+  the NMPC then trailed that drive at 2-3.7 m/s^2 (w_accel, and w_lat growing with v^4 in the bend), losing each gap;
+  (8) a 1 m give on yield gates moved with the car each plan and it crept into the stream's lane (fixed). Also: the
+  junction slack in map.py's band made the oncoming lane beside it overlap; it now widens only the corridor.
+- **How PDM-Lite does route 8** (~/b2d_results/pdm_lite/08_SignalizedJunctionRightTurn: steps.csv each tick,
+  video; 100 %, 11.3 s, no infractions). The scenario (signalized_junction_right_turn.py) turns the ego's light
+  green 5 s after it passes the trigger (x 2502.3), and starts the flow then: cars come in after +1.75 s, then a
+  hole to +5.75 s, then every 1.8-2.1 s (the same in all our runs, 13 m/s, 24-26 m apart, constant velocity).
+  PDM-Lite waits at the line, and at green (+4.65 s) goes at full throttle (5-8 m/s^2 from rest), through the bend
+  at 9-14 m/s (yaw rate x speed up to 10-18 m/s^2), reaches the stream's lane (~10 m past the line) 2.15 s later at
+  11.4 m/s, about 1 s behind the first car after the hole and 1 s ahead of the next, and goes on to 17.9 m/s, so the
+  car behind falls back. It never yields to the stream ("no hazard"); it follows the car ahead (19-34 m).
+  Ours in the same gap (follow1_r8): waited 2 m further back, started 1.9 s after green, planned the bend at
+  `merge_a_lat` 6 (~8.5 m/s), `v_top` 13.9 (stream + 1), and the plan crawled during its hold.
+- **The NMPC's horizon is 2 s, and a "before" gate still shut at its end must be stoppable at** (stop_rows adds the
+  stopping distance at the last step). A merge gate that opens at 2-2.5 s therefore made every plan come up to
+  the entry slowly (pdmtune_r8 at 10 s: plans ending at 2.4-3.5 m/s where 5-6.4 was asked), though the merge
+  check judged the gap on rolling through as it opens. Roll-through gates now allow the asked speed's stopping
+  distance at the last step. A second cause, from the log: a merger's lead is held 300 m on until it comes in,
+  and the centred difference across that drop gave it speed 0, tapering the asked speed to ~4 m/s just as the car
+  ahead went in (fixed in lead_profile, not yet run).
 - **Route 8's gaps fit only without margin.** The stream is 13 m/s with about 1.9 s between cars. Merging with 3 m
   behind needs 2.8 s at 3 m/s² to 6 m/s, or 2.1 s at 5 m/s² to 7.5 m/s. A to-scale profile clears 1.3 m ahead and
   0.9 m behind. Plain SimLingo enters this stream (100 %, no infractions, twice), though 78.6 m in 11.5 s looks
@@ -420,6 +496,52 @@ whenever a run, a test or a dead end teaches something not obvious from the code
   enough that no gap passed with `oncoming_gap` 20 m and an unseen car assumed at the limit at the edge of sight.
   Stopping further back did not buy sight here (it is capped by the oncoming cars and the 70 m reach), but did lengthen
   the pass. Plain SimLingo finishes route 4.
+- **Route 4's clear check cannot pass from where the car stops** (asked-overtake's log, analysed 12 Nov). From rest
+  20.5 m short of the cones the pass is 41.5 m (to `b_hi + 10`), 5.9 s at the 8.3 m/s limit. A seen car at 8 m/s must
+  then be 114 m off, and the unseen-car rule needs 113 m of sight; sight never exceeds 70 m and the flow's cars appear
+  100 m ahead. The flow's gaps were 40, 41, 66 and 113 m. In the 113 m gap the seen-car check did pass (15 plans,
+  26.15-28.95 s); the sight rule alone held the car, and the watchdog ended the run at 37.55 s.
+- **Backing up and peeking, and overtakes 20 km/h over the limit** (12 Nov; results/bench2drive/peek_r4 to peek4_r4,
+  offline `peek_to_see`). Stopped to see with the lane to go into not seen far enough, the planner asks the agent to
+  back up (`Decision.reverse`, `reverse_delta`: the NMPC plans forwards only; up to `peek_back` 12 m, steered along
+  the lane, `peek_rear_gap` from anything behind), then base comes forward `peek_run` 8 m at 2 m/s over to that side
+  of the lane (`peek_over` 0.3 m past its edge, margins included) and waits; meanwhile and on the way round after it
+  the agent plans on the lane's path (`Decision.keep_lane`). The way round goes up to `overtake_over_limit` over the
+  limit, judged at that speed, back in lane further on (`done`, `back_by` scale with it; the line back is a ramp).
+  What route 4 showed, one run each:
+  - The peek works: sight with the oncoming lane empty went from 70 m to a steady 104-106 m (0.55 m left of where
+    it stopped, 3.6 m further back). It does not go beyond about 106 m from 20 or from 24 m back, so the sign is no
+    longer what limits it; what does is not known. The flow's cars appear 102-103 m ahead.
+  - Route 4 still fails (19.7-25.8 %): from there the pass needs about 117 m of sight (51 m to `done` in 5.1 s, the
+    20 m gap, an unseen car at the limit). The extra 20 km/h buys little: from rest 25 m back 96 m against 100 m,
+    because the car is back in its lane further on at the higher speed.
+  - Over 8 m forward at 2 m/s the car moves over 0.4-0.5 m; over 4 m, 0.15 m. With an oncoming car alongside the
+    edged-out car the movers' slack is 0.3-0.4 (the circles), and a plan made then steers back.
+  - A way round withdrawn half way out (the sight read 106, then 92 and 80 as the car turned) left the car askew, and
+    backing straight from 0.26 rad off took it 2 m across into the oncoming lane: going round from a peek the sight
+    judged at the start stands (seen traffic still holds it), and backing up is steered along the lane.
+  - **With 5 m kept to oncoming traffic, not 20, route 4 finishes** (gap5_r4, one run: 100 %, 37.8 s, no collision;
+    the agent's `oncoming_gap`, ONCOMING_GAP to change it; the core's default stays 20). Clear at 26.75 s with 104 m
+    seen and the next car 102 m off, just appearing; out at up to 13.1 m/s. Coming back the car was still 0.9 m into
+    the oncoming lane with that car 17 m ahead, and in its lane with it 6 m ahead: about 0.3 s to spare, back at
+    0.3 rad to the lane at 12.5 m/s. Whether the oncoming car braked is not known.
+  - **Route 6 with all of this (gap5_r6, one run): 36.9 % as before, and now a collision** (driving score 22.1).
+    The three accident cars stand in a row 6-10 m apart: only the front one counts as parked (a blocker); the
+    police car and the middle one have a vehicle within 10 m ahead, so they are waiting in traffic (`_parked`), leads.
+    A car stood 10 m behind the ego, so there was no backing up, and the peek's 8 m forward took the car to 3 m behind
+    the police car (the lead's gap; the peek's own limit is measured to the blocker, 16 m further on). Clear at
+    25.75 s, the way round had the police car as a lead 3 m ahead: 0.6 m in 10 s, turned out 0.25 rad, withdrawn for
+    oncoming traffic at 35.35 s. From 36.75 s the car stood 1.2 m left of the lane's middle at 0.33 rad, its nose
+    about 1.4 m into the oncoming lane; oncoming cars stopped before it and one touched it at about 65 s.
+  - **Three fixes after that run, then route 6 100 % (46.1 s, no infraction) and route 4 100 % again (37.9 s)**
+    (fix3_r6, fix3_r4, one run each). (a) `_parked`: a vehicle ahead holds a car up only if it is not itself parked,
+    so the row of accident cars is three blockers. (b) The peek stays `peek_min_gap` from leads too and comes forward
+    no further than it backed up; `peek_rear_gap` 1.5 m. (c) Stopped to see with its body out of the lane, the car
+    backs up along the lane, or with no room behind comes forward `peek_run` to straighten (not seen in a run). On
+    route 6 a car was closing from behind: no backing up, no creep, a wait 13 m behind the police car from 9 to
+    35 s, then round all three. Route 4's return was as tight as before (1.4 m over with the next car 17 m ahead).
+  - At 50 km/h past a blocker "base" cannot stop behind it and took its 100 iterations (100 ms): it is not solved
+    then (`Candidate::hopeless`).
 - **Braking limit -4.6 m/s²** (`NmpcOptions::a_min`, and the agent; 10 Nov, from -7). `dilemma_decel` follows it to 4.6.
   Offline the solves got faster (`parked_car_overtake` p95 56 -> 42-46 ms, now within 50), but `pedestrian_behind_van`
   can no longer stop in a straight line: a pedestrian stepping out 17 m ahead at 10.9 m/s needs about 5 m/s² with the

@@ -349,8 +349,11 @@ Plan UrbanNMPC::solve(const Problem& pr) {
     const double front_now = s0 + 0.5 * body.length - body.cg_to_center;
     std::vector<double> lead, lead_speed;
     lead_profile(pr.leads, times, front_now, opt, lead, lead_speed);
-    const std::vector<double> cap = stop_profile(pr.gates, times, front_now);
-    const std::vector<double> floor = pass_profile(pr.gates, times);
+    // a gate the plan rolls through as it opens may be reached at the speed asked for at the horizon's end (stop.cpp)
+    const double v_end = std::min(pr.v_max, pr.v_ref.empty() ? pr.v_max : sample(pr.v_ref_t, pr.v_ref, times[N]));
+    const std::vector<double> cap = stop_profile(pr.gates, times, front_now, false, v_end * v_end / (2.0 * opt.a_stop));
+    const std::vector<double> cap_taper = stop_profile(pr.gates, times, front_now, true);
+    const std::vector<double> floor = pass_profile(pr.gates, pr.chasers, times, std::max(opt.gap_min, 2.0));
     // in the order of the parameters in the constructor
     std::vector<double> par(z0.data(), z0.data() + NX);
     for (int k = 0; k < N; ++k) {  // mean curvature over each step
@@ -359,19 +362,25 @@ Plan UrbanNMPC::solve(const Problem& pr) {
         par.push_back(sum / 5.0);
     }
     const double front_arm = 0.5 * body.length - body.cg_to_center;
+    NmpcOptions follow_opt = opt;  // the problem's own spacing behind a lead, where it sets one
+    if (std::isfinite(pr.follow_gap)) follow_opt.gap = pr.follow_gap;
+    if (std::isfinite(pr.follow_time_gap)) follow_opt.time_gap = pr.follow_time_gap;
     for (int k = 0; k < N; ++k) {  // what is asked for, tapered to the bends, stops and leads ahead of the shifted plan
         double v = std::min(pr.v_max, pr.v_ref.empty() ? pr.v_max : sample(pr.v_ref_t, pr.v_ref, times[k + 1]));
         const double front = s_plan[k + 1] + front_arm;
-        v = bend_speed(v, par[NX + k], opt);  // turn.cpp
-        v = stop_speed(v, cap[k], front, opt);  // stop.cpp
-        v = behind_lead_speed(v, lead[k], lead_speed[k], front, opt);  // follow.cpp
+        v = bend_speed(v, par[NX + k], std::isfinite(pr.a_lat_ref) ? pr.a_lat_ref : opt.a_lat_ref);  // turn.cpp
+        v = stop_speed(v, cap_taper[k], front, opt);  // stop.cpp
+        v = behind_lead_speed(v, lead[k], lead_speed[k], front, follow_opt);  // follow.cpp
         par.push_back(v);
     }
     for (const auto* ys : {&c.ref, &c.lo, &c.hi})
         for (int k = 0; k < N; ++k) par.push_back(sample(c.s, *ys, s_plan[k + 1]));
     par.push_back(pr.v_max);
     par.push_back(opt.mu * p.g);
-    for (const CostTerm& term : cost_terms()) par.push_back(opt.*term.weight);
+    NmpcOptions weights = opt;  // the problem's own, where it sets them
+    if (std::isfinite(pr.w_accel)) weights.w_accel = pr.w_accel;
+    if (std::isfinite(pr.w_lat)) weights.w_lat = pr.w_lat;
+    for (const CostTerm& term : cost_terms()) par.push_back(weights.*term.weight);
     auto slot_values = [&](std::vector<double> MoverSlot::*field, double unused) {
         for (int k = 0; k < N; ++k)
             for (int j = 0; j < n_m; ++j) par.push_back(j < n_used ? (slots[j].*field)[k] : unused);
@@ -393,7 +402,7 @@ Plan UrbanNMPC::solve(const Problem& pr) {
     // now (the vehicle's a_drive_max), held over the horizon: the speed changes little between solves, 0.1 s apart.
     // Above an acceleration the car already has, it comes down at the jerk limit, so the bound is never one the
     // first steps cannot meet.
-    a_limit = std::min(opt.a_max, p.a_drive(std::max(0.0, z0[IV])));
+    a_limit = std::min(std::isnan(pr.a_max) ? opt.a_max : pr.a_max, p.a_drive(std::max(0.0, z0[IV])));
     std::vector<double> ubw = m.ubw;
     for (int k = 1; k <= N; ++k) ubw[m.x_at(k) + IA] = std::max(a_limit, z0[IA] - opt.jerk_max * times[k]);
     casadi::DMDict args = {{"p", par}, {"lbx", m.lbw}, {"ubx", ubw}, {"lbg", m.lbg}, {"ubg", m.ubg}, {"x0", m.w0}};

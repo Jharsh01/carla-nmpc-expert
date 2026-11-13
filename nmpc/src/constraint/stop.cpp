@@ -27,7 +27,7 @@ std::vector<Gate> StopRules::gates(const Percept& p, const Scene& sc, double a_r
         if (to_line > opt.look_ahead || to_line < -2.0) continue;
         const double decel = v0 * v0 / (2.0 * std::max(0.1, to_line));
         switch (st.kind) {
-            case StopLine::route_end: out.push_back({st.s}); break;
+            case StopLine::route_end: out.push_back({st.s, 0.0, INF, true, true}); break;
             case StopLine::stop_sign:
                 if (released_.count(st.id)) break;
                 if (v0 < 0.1 && to_line < 4.0) {
@@ -66,13 +66,19 @@ std::vector<Gate> StopRules::gates(const Percept& p, const Scene& sc, double a_r
     return out;
 }
 
-std::vector<double> stop_profile(const std::vector<Gate>& gates, const std::vector<double>& times, double front_now) {
+std::vector<double> stop_profile(const std::vector<Gate>& gates, const std::vector<double>& times, double front_now,
+                                 bool tapered_only, double roll_through) {
     const int N = static_cast<int>(times.size()) - 1;
     std::vector<double> cap(N, INF);
     for (int k = 0; k < N; ++k) {
         const double t = times[k + 1];
         for (const Gate& gt : gates)
-            if (gt.before && gt.t_from <= t && t <= gt.t_to) cap[k] = std::min(cap[k], gt.s);
+            if (gt.before && gt.t_from <= t && t <= gt.t_to && (gt.taper || !tapered_only))
+                // at the last step, a gate rolled through as it opens (taper off) is moved on by `roll_through`: the room
+                // to stop from the speed asked for then, which the last step's row adds to the front. Without it, while
+                // the gate opens beyond the horizon (2 s) the plan must be able to stop at it, and comes up to it
+                // crawling (route 8, pdmtune_r8 at 10 s: plans ending at 2.4 m/s where 6.4 was asked)
+                cap[k] = std::min(cap[k], gt.s + (k == N - 1 && !gt.taper ? roll_through : 0.0));
         // never asked to go back: a stop line the front is already over holds the car where it is
         if (std::isfinite(cap[k])) cap[k] = std::max(cap[k], front_now);
     }

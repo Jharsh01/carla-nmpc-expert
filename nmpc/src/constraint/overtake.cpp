@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "nmpc/constraint/crossing.hpp"
+#include "nmpc/constraint/merge.hpp"
 #include "perception/lanes.hpp"
 
 namespace ex {
@@ -96,8 +97,12 @@ void overtake(const Constraints& cs, const Percept& p, const Scene& sc, bool lef
     // front is `done`.
     // Bench2Drive's opposite flows (routes 4 and 6) send a car every 70-149 m at the limit: a pass begun at 5 m/s,
     // judged over the 4 s the tracks reach, met the next car half way and both stopped nose to nose.
-    const Drive pass = drive(v0, std::max(v0, sc.v_max), cs.nmpc_opt.a_max, cs.params);
-    const double done = b_hi + 10.0, T = pass.time_to(std::max(0.0, done - front0));
+    const double v_pass = sc.v_max + opt.overtake_over_limit;  // out of the other lane sooner
+    const Drive pass = drive(v0, std::max(v0, v_pass), cs.nmpc_opt.a_max, cs.params);
+    // Back in its lane the faster it goes the further past the blockers: the same time to move over, at the speed
+    // of the pass (10 and 15 m at 30 km/h, which they were set at).
+    const double done = b_hi + std::max(10.0, 1.0 * v_pass), back_by = b_hi + std::max(15.0, 1.6 * v_pass);
+    const double T = pass.time_to(std::max(0.0, done - front0));
     auto ours = [&](double t) { return std::min(front0 + pass.at(t), done); };  // where the front is, t from now
     const double length = front0 - rear0;
     auto in_band = [](double e, double ext_e, std::pair<double, double> band) {
@@ -145,6 +150,11 @@ void overtake(const Constraints& cs, const Percept& p, const Scene& sc, bool lef
             unseen_traffic = s + half > rear0 && s - half < ours(t) + opt.oncoming_gap;
         }
     }
+    // Going round from where the car edged out to see (peek 3), what it saw then stands: on the way out the sight
+    // read swings (route 4: 106 m, then 92 and 80 as the car turned and closed on the sign), and a way round
+    // withdrawn half way out leaves the car askew in its lane. Traffic it does see still holds it.
+    if (cs.peek == 3 && last_label == label) unseen_traffic = false;
+    if (unseen_traffic) out.sight_short[left ? 1 : 0] = true;
     const bool head_on_traffic = any_conflict(p.oncoming, T, head_on, false);
     const bool cut_off_traffic = any_conflict(p.along, std::min(T, opt.merge_time), cut_off, true);
     // once out in that lane and past where it would wait behind the blocker, the car finishes going round; short of
@@ -165,21 +175,29 @@ void overtake(const Constraints& cs, const Percept& p, const Scene& sc, bool lef
     c.problem = Problem();
     c.problem.t = sc.t;
     c.problem.ego = sc.ego;
-    c.problem.v_max = sc.v_max;
-    // at the limit, as the pass was judged: not SimLingo's speeds, which slow to a stop while it waits on the same
+    c.problem.v_max = v_pass;
+    // at the speed the pass was judged at: not SimLingo's speeds, which slow to a stop while it waits on the same
     // traffic (a crawl into the other lane on route 4); the actors and the rules still bring it down
     c.problem.corridor = lane;
     c.problem.leads = p.leads;
     c.problem.gates = stop_gates;
     Corridor& cr = c.problem.corridor;
+    // out into that lane beside the blockers; from where the car is when it has edged out to see (peeking): back
+    // in the middle of its lane on the way up to the blocker it would see less again, and the way round be withdrawn
+    const double out_from = cs.peek != 0 ? s0 : b_lo - 12.0;
     for (size_t i = 0; i < cr.s.size(); ++i) {
         const LaneSection& li = section(cr.s[i]);
         const auto band = target(li);
-        if (cr.s[i] > s0 - 10.0 && cr.s[i] < b_hi + 15.0 && width(li) > 0.0) {
+        if (cr.s[i] > s0 - 10.0 && cr.s[i] < back_by && width(li) > 0.0) {
             if (left) cr.hi[i] = std::min(li.road_hi, band.second);
             else cr.lo[i] = std::max(li.road_lo, band.first);
         }
-        if (cr.s[i] > b_lo - 12.0 && cr.s[i] < b_hi + 6.0 && width(li) > 0.0) cr.ref[i] = 0.5 * (band.first + band.second);
+        if (cr.s[i] > out_from && cr.s[i] < back_by && width(li) > 0.0) {
+            // in that lane to 6 m past the blockers, then back over to the car's own by `back_by`, not at once: at
+            // 50 km/h a line that jumps back asks for all the grip there is
+            const double w = std::clamp((cr.s[i] - (b_hi + 6.0)) / std::max(1.0, back_by - 4.0 - (b_hi + 6.0)), 0.0, 1.0);
+            cr.ref[i] = (1.0 - w) * 0.5 * (band.first + band.second) + w * cr.ref[i];
+        }
     }
     // The blockers and the still things beside the way round are the corridor's edges, boxes and not circles: the
     // circles cover a car's side 0.3 m wide of it, and the ego's too, so between route 4's cones and the cars parked
@@ -208,6 +226,7 @@ void overtake(const Constraints& cs, const Percept& p, const Scene& sc, bool lef
                                                    : 0.5 * (cr.lo[i] + cr.hi[i]);
     c.problem.movers = p.moving;
     for (const Crosser& x : p.crossers) c.problem.gates.push_back(yield_gate(x, opt));
+    wait_for_mergers(c.problem, p, opt);
     // the lanes it goes into count here
     c.problem.movers.insert(c.problem.movers.end(), p.stay_out.begin(), p.stay_out.end());
     if (static_cast<int>(out.candidates.size()) >= opt.pool) out.candidates.pop_back();

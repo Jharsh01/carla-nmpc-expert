@@ -137,6 +137,26 @@ struct ConstraintOptions : PerceptionOptions {
     int pool = 4;  // NMPC instances, the most candidates solved at once
     double gate_margin = 1.0;  // kept between the ego's body and a crosser's [m]
     double gate_buffer = 1.0;  // a crosser's window widened by this much either side [s]
+    // Going across a stream between two of its cars (constraint/crossing.cpp: cross), on the drive the gap is judged
+    // on: each car's window widened by this much either side, not gate_buffer. PDM-Lite keeps only its boxes grown
+    // (x1.2-1.5 the other's length, x1.3 its own when moving), some 0.1-0.25 s at 10 m/s; with 1 s either side no gap
+    // of route 10's stream (10 m/s, clear 0.7-1.5 s at the crossing) was ever left
+    // (13 Nov: 0.1; the stream's cars keep their speed, and its gaps, free 1.0-1.9 s at the line, take the ego ~2.6 s)
+    double cross_buffer = 0.1;  // [s]
+    // A crosser slower than this now (a car inching up to its stop line) counts only over the next cross_slow_horizon:
+    // whether it then stops or goes is not known, and it is judged again each plan. PDM-Lite, 2 s ahead from their
+    // controls, saw route 10's cross-road queue brake; predicted 8 s on at its creep, it shut most of the stream's gaps.
+    double cross_slow_speed = 5.0;  // [m/s] (route 10's queue crept at up to 4.4 m/s after its stop)
+    double cross_slow_horizon = 2.5;  // [s]
+    // and is on the ego's path where its body comes within this of the ego's sides (the ego on the path) [m]
+    double cross_side = 0.5;
+    // The corridor is the lane's band and this much either side where the band has no road edges (a junction, where
+    // no lines are painted, or where the nearest lane crosses the path): a car takes a turn wider or tighter than the
+    // lane's centre. With the lane alone (route 8's right turn: +-1.4 m) the car's ends had +-0.23 m to follow the
+    // bend, and the NMPC slowed to 2-3 m/s to keep in it; 0.3 m more let the same plans (replaylog_r8) go to 7-8 m/s.
+    // Only the corridor: the band the actors are classified on stays the lane (on it, route 10's oncoming lane beside
+    // the band overlapped it, and the cars in it were crossers all along the approach).
+    double junction_slack = 0.4;  // [m]
     double blocker_range = 40.0;  // a blocker nearer than this may be overtaken [m]
     double oncoming_gap = 20.0;  // kept to oncoming traffic when overtaking [m]
     // an oncoming lane inside the band (SimLingo's path changing into it) counts as one to go round through when at
@@ -153,6 +173,46 @@ struct ConstraintOptions : PerceptionOptions {
     // after this long at the speed now: the plan is driven a tick late and the brake builds up (on route 4 a stop
     // judged at 3 m/s^2 from the first instant asked for 6, which the MKZ's brake under 6.5 m/s turned into 20)
     double view_stop_delay = 0.5;  // [s]
+    // Out in another lane round a blocker the car may go this much over the limit, to be out of that lane sooner
+    // (the pass is judged at that speed too); back in its lane it comes down to the limit at the speed cost's pace.
+    double overtake_over_limit = 20.0 / 3.6;  // [m/s]
+    // Peeking: stopped to see (view_stop) and the lane to go into is not seen far enough, the car backs up to
+    // `peek_back` further from the blocker (never nearer than `peek_rear_gap` to anything behind it; the agent drives
+    // this, the NMPC does not reverse), then comes forward `peek_run` at `peek_speed` over to that side of its lane,
+    // its body's edge margin `peek_over` past the lane's edge, and waits there: a blocker hides less of the lane
+    // beyond from further back and from nearer that side. Never nearer the blocker, or a car followed, than
+    // `peek_min_gap`, and forward no further than it backed up (route 6: with a car behind it there was no backing
+    // up, and 8 m forward took it to 3 m behind the car ahead, with no room left to pull out). A car left out of
+    // its lane by a way round that was withdrawn is brought back the same way: backed up along the lane, or, with
+    // no room behind, forward `peek_run` to straighten.
+    double peek_back = 12.0;  // [m] (route 4: sight grew about 4 m for each metre further back, the pass 1 m)
+    double peek_run = 8.0;  // [m] (in CARLA the car moved over 0.15 m in the first 2.5 m)
+    double peek_over = 0.3;  // [m]
+    double peek_min_gap = 8.0;  // [m]
+    double peek_rear_gap = 1.5;  // [m]
+    double peek_speed = 2.0;  // [m/s]
+    // Merging into a stream (constraint/merge): the ego goes in behind one car and ahead of the next when, driven
+    // as hard as it can out of the bend, its rear stays `merge_gap` ahead of that next car's front (and its front
+    // `merge_lead_gap` behind the rear of the one before) for as long as the two are predicted; it enters no
+    // sooner than `merge_lag` after the car it follows. It may match the stream's speed, up to
+    // `overtake_over_limit` above the limit: the stream's cars do not slow for it.
+    double merge_gap = 2.0;  // [m] (13 Nov: 2, as the NMPC keeps behind a chaser, framework.cpp pass_profile)
+    double merge_lead_gap = 1.0;  // [m] (13 Nov: 1, close behind it at its speed; was 2)
+    double merge_lag = 0.0;  // [s] (13 Nov: 0, the 1 m behind it is what keeps them apart; was 0.2)
+    // Waiting for the stream the ego stays this far back from where it comes in, as far as it can: from rest at
+    // the entry the car behind in the stream closes 17 m while the ego gets up to its 13 m/s, with this run-up 1 m.
+    double merge_run_up = 15.0;  // [m]
+    // and takes the bend into the stream at this lateral acceleration, not the comfortable a_lat_ref: the faster it
+    // comes out of the bend the less the car behind closes on it (route 8: 9 m at 3 m/s^2 round a 6 m bend)
+    double merge_a_lat = 8.5;  // [m/s^2] (13 Nov: 8.5, within mu g = 8.8; PDM-Lite takes route 8's bend at 10-18; was 6)
+    // Going in ahead of a car, expect it to brake at this from when the ego is in its lane (0: it does not slow,
+    // the default; Bench2Drive's streams do not, until they hit something). A trial setting, 12 Nov.
+    double merge_chaser_brake = 0.0;  // [m/s^2]
+    // Turn into the lane without waiting for or fitting between cars coming down it from a side road (Percept::
+    // mergers, and those joining behind): once the stop line allows, the ego goes. A car of the stream already in
+    // the lane ahead is still followed. Chosen 13 Nov for route 8 (turn right on green, the stream not yielded to);
+    // the stream's cars do not slow for the ego.
+    bool ignore_mergers = false;
     double stop_hold = 1.0;  // [s] at a stop sign
     double dilemma_decel = 4.6;  // a light turning red that needs more than this to stop for is driven through [m/s^2]
                                  // (no more than the braking limit, -a_min: a stop needing more cannot be made)

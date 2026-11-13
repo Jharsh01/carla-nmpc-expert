@@ -7,6 +7,7 @@ namespace ex {
 
 Percept Perception::perceive(const Scene& sc, const Path& route, const Eigen::Matrix<double, NX, 1>& z0) const {
     Percept p;
+    p.route = &route;
     p.z0 = z0;
     const double s0 = p.s0 = z0[IS];
     p.v0 = sc.ego.v;
@@ -21,6 +22,8 @@ Percept Perception::perceive(const Scene& sc, const Path& route, const Eigen::Ma
         Track tr;
         if (make_track(a, project, tr) && near_route(tr, s0, p.rear0, opt.look_ahead)) p.tracks.push_back(std::move(tr));
     }
+    for (double s = s0; s <= std::min(route.length(), s0 + opt.look_ahead); s += 2.0)
+        p.bend_s.push_back(s), p.bend_kappa.push_back(route.curvature(s));
     classify(p, body, opt, project);
     return p;
 }

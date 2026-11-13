@@ -417,3 +417,64 @@ def test_what_the_car_cannot_see_along_the_oncoming_lane_holds_the_overtake():
     planner, scene = _road_with_a_blocker(lane)
     scene.sight_left = 150.0
     assert any(c.label == "borrow_left" for c in planner.step(scene).candidates)
+
+
+def test_an_overtake_goes_up_to_20_kmh_over_the_limit():
+    """Out in the other lane the car may be over the limit, to be out of it sooner; the pass is judged at that speed,
+    so a gap a little too short at the limit is taken."""
+    lane = expertctl.LaneSection(lo=-1.6, hi=1.6, left_width=3.2, left_oncoming=True, left_allowed=True,
+                                 road_lo=-1.6, road_hi=4.8)
+    planner, scene = _road_with_a_blocker(lane)
+    borrow = next(c for c in planner.step(scene).candidates if c.label == "borrow_left")
+    assert borrow.problem.v_max == pytest.approx(8.33 + 20.0 / 3.6)
+
+    def clear(over, sight):
+        options = expertctl.PlannerOptions()
+        options.overtake_over_limit = over
+        planner, scene = _road_with_a_blocker(lane, v0=0.0)
+        planner = expertctl.Planner(planner.route, expertctl.VehicleParams.from_file(
+            os.path.join(REPO, "config", "vehicles", "mkz2020.json")), expertctl.Body(), _short_horizon(), options)
+        scene.sight_left = sight
+        return any(c.label == "borrow_left" for c in planner.step(scene).candidates)
+
+    # from rest 25 m back: 100 m of sight needed at the limit, 96 m over it (the car is back in its lane further on)
+    assert not clear(0.0, 98.0)
+    assert clear(20.0 / 3.6, 98.0)
+
+
+def _short_horizon():
+    options = expertctl.UrbanOptions()
+    options.horizon, options.fine, options.h_fine, options.h = 2.0, 1.0, 0.05, 0.2
+    return options
+
+
+def test_stopped_to_see_and_seeing_too_little_the_car_backs_up_then_edges_out():
+    """Bench2Drive route 4: SimLingo asks to go round a blocker that hides the oncoming lane beyond it. At rest the
+    planner asks to back up (the agent drives that), as far as there is room behind; then the plan comes forward
+    over to the left of the lane, slowly, to see past the blocker."""
+    lane = expertctl.LaneSection(lo=-1.6, hi=1.6, left_width=3.2, left_oncoming=True, left_allowed=True,
+                                 road_lo=-1.6, road_hi=4.8)
+    planner, scene = _road_with_a_blocker(lane, v0=0.0)
+    scene.asks_change, scene.sight_left = 1, 40.0
+    decision = planner.step(scene)
+    assert decision.reverse == pytest.approx(expertctl.PlannerOptions().peek_back)
+    assert decision.keep_lane
+    scene.ego = expertctl.Ego(x=0.3 - expertctl.PlannerOptions().peek_back, v=0.0)  # backed up
+    decision = planner.step(scene)
+    assert decision.reverse == 0.0
+    assert "peek: edged out to see down the left lane" in decision.notes
+    base = decision.candidates[0]
+    assert base.problem.v_max == pytest.approx(expertctl.PlannerOptions().peek_speed)
+    cr = base.problem.corridor
+    assert max(cr.ref) > 0.6 and max(cr.hi) == pytest.approx(1.9)  # over to the left, a little past the lane's edge
+    for _ in range(3):  # from the plan held at rest, a few solves to get going
+        decision = planner.step(scene)
+    assert max(decision.plan.x[:, 3]) > 0.3  # coming forward
+    scene.sight_left = 150.0  # it sees
+    assert planner.step(scene).label == "borrow_left"
+
+    behind = _car(-7.0, 0.0, 0.0)  # a car close behind: no room
+    behind.id = 3
+    planner, scene = _road_with_a_blocker(lane, [behind], v0=0.0)
+    scene.asks_change, scene.sight_left = 1, 40.0
+    assert planner.step(scene).reverse < 2.0

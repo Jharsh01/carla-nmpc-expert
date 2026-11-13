@@ -30,7 +30,9 @@ private:
 };
 
 // The nearest gate ahead to stay behind at the end of each step (INF: none); never behind the front now.
-std::vector<double> stop_profile(const std::vector<Gate>& gates, const std::vector<double>& times, double front_now);
+std::vector<double> stop_profile(const std::vector<Gate>& gates, const std::vector<double>& times, double front_now,
+                                 bool tapered_only = false,
+                                 double roll_through = 0.0);
 
 // The speed asked for v, no more than stops at `cap` at a_ref.
 double stop_speed(double v, double cap, double front, const NmpcOptions& opt);

@@ -26,6 +26,8 @@ bool make_track(const Actor& a, const Projector& project, Track& tr) {
         tr.ext_s.push_back(0.5 * (std::fabs(a.length * std::cos(rel)) + std::fabs(a.width * std::sin(rel))));
         tr.ext_e.push_back(0.5 * (std::fabs(a.length * std::sin(rel)) + std::fabs(a.width * std::cos(rel))));
         if (i == 0) tr.cos_rel = std::cos(rel);
+        // (its heading at the last sample on the stretch of path: past its end, s is clamped there)
+        if (i == 0 || s < std::min(project.s_hi, project.route.length()) - 0.1) tr.cos_end = std::cos(rel);
     }
     if (a.t.size() > 1) tr.speed = std::hypot(a.x[1] - a.x[0], a.y[1] - a.y[0]) / (a.t[1] - a.t[0]);
     return true;

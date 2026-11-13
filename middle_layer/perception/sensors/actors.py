@@ -20,6 +20,10 @@ from expert import frames
 from middle_layer.perception.sensors.map import lane_key
 
 HORIZON, STEP = 5.0, 0.25  # [s] of each predicted trajectory
+# A vehicle going along its lane is predicted further: the stream at a junction (Bench2Drive route 8, 13 m/s) was a
+# merger only 3.5 s before it came in, when the ego, rolling up at 5 m/s, could no longer time its arrival to a gap,
+# and stopped. Beyond the NMPC's own horizon (5 s) only the merge's check and the classes read it.
+LANE_HORIZON = 8.0  # [s]
 # Bench2Drive spawns the parked cars along the route as static.prop.mesh actors with car meshes
 # (leaderboard/scenarios/route_scenario.py, spawn_parked_vehicles), whose bounding boxes CARLA gets wrong (a 5 m
 # Charger reports 3.0 x 3.9 m; on Town12 they came out 2.0 x 4.3 m, a car turned sideways): taken as parked cars of
@@ -31,6 +35,17 @@ INTENT_REACH = 0.3  # its body this far over a lane's edge is in that lane [m]
 INTENT_DRIFT = 0.3  # sideways speed across its lane that means something (the tracker's noise is under it) [m/s]
 INTENT_AHEAD = 3.0  # how far ahead a sideways motion is carried on [s]
 INTENT_ALIGNED = 35.0  # further than this off its lane's direction a car is crossing, not going along it [deg]
+# A car with a stop sign ahead on its lane, before the junction, that is slow or braking and can stop at it without
+# braking hard, is predicted to stop there, as the ego does; once it has been at rest near it, it goes on as predicted
+# along its lane. Bench2Drive route 10 (a junction with a stop sign on every approach): the cars queued on the cross
+# road crept forward at 2-4 m/s and stopped, again and again, and each creep, predicted 8 s on at that speed, took
+# them across the junction just ahead of the ego, which waited for good. PDM-Lite, predicting 2 s from the cars'
+# controls, saw them brake. The scenario's stream there (10 m/s, never slowing) is not slow: it stays predicted on.
+STOP_SPEED = 5.0  # [m/s]
+STOP_DECEL = 3.0  # the most it is expected to brake for the sign [m/s^2]
+STOP_REACH = 30.0  # stop signs looked for this far ahead on its lane [m]
+STOP_DONE = 4.0  # at rest this near its stop sign, it has stopped there [m]
+STOP_MEMORY = 20.0  # and goes on for this long after [s]
 
 
 class Track:
@@ -40,6 +55,7 @@ class Track:
         self.history = []  # (t, x, y, psi) in the library's frame
         self.last_seen = -math.inf
         self.still_since = None  # when it last came to rest
+        self.stopped_at_sign = -math.inf  # when it was last at rest at the stop sign ahead of it (STOP_DONE)
         self.length = self.width = 0.0
         self.mesh_car = False  # a parked car spawned as a static mesh (PARKED_CAR)
 
@@ -166,9 +182,11 @@ class Actors:
 
     # ---- prediction
 
-    def _parked(self, track, t):
+    def _parked(self, track, t, _behind=()):
         """At rest and not waiting in traffic: hazard lights on, off the driving lanes or well off a lane's centre,
-        or at rest for 4 s with nothing ahead holding it up (no vehicle within 10 m ahead in its lane, no light)."""
+        or at rest for 4 s with nothing ahead holding it up (no vehicle within 10 m ahead in its lane that is not
+        itself parked, no light). Bench2Drive route 6: three accident cars in a row 6-10 m apart, of which only the
+        front one was parked; the two behind it were traffic to wait behind, for good."""
         if track.mesh_car:
             return True
         if track.kind != "vehicle" or track.still_since is None:
@@ -194,12 +212,22 @@ class Actors:
             ahead = dx * math.cos(psi0) + dy * math.sin(psi0)
             side = -dx * math.sin(psi0) + dy * math.cos(psi0)
             if 0.0 < ahead < 10.0 + 0.5 * (track.length + other.length) and abs(side) < 1.5:
-                return False
+                if other in _behind or not self._parked(other, t, _behind + (track,)):
+                    return False  # held up by one that is itself in traffic
         return True
 
-    def _follow_lane(self, track, speed, accel):
-        """Centre positions along its lane at each step, at its speed (braking to rest if it is braking), or None if
-        it is not going along a driving lane. At a junction, the branch nearest its heading."""
+    def _stop_ahead(self, wp):
+        """How far along its lane the stop sign before the next junction is [m], or None."""
+        try:
+            signs = wp.get_landmarks_of_type(STOP_REACH, "206", True)
+        except RuntimeError:
+            return None
+        return min((l.distance for l in signs), default=None)
+
+    def _follow_lane(self, track, speed, accel, t=0.0):
+        """Centre positions along its lane at each step, at its speed (braking to rest if it is braking, or to stop at
+        a stop sign ahead: STOP_*), or None if it is not going along a driving lane. At a junction, the branch nearest
+        its heading."""
         carla = self.carla
         actor = track.actor
         wp = self.map.get_waypoint(actor.get_location(), project_to_road=True, lane_type=carla.LaneType.Driving)
@@ -208,8 +236,13 @@ class Actors:
         yaw = actor.get_transform().rotation.yaw
         if abs((wp.transform.rotation.yaw - yaw + 180.0) % 360.0 - 180.0) > 35.0:
             return None
-        times = np.arange(0.0, HORIZON + 1e-9, STEP)
-        if accel < -1.0:  # braking: to rest
+        times = np.arange(0.0, LANE_HORIZON + 1e-9, STEP)
+        stop = None if wp.is_junction or t - track.stopped_at_sign < STOP_MEMORY else self._stop_ahead(wp)
+        if stop is not None and (speed <= STOP_SPEED or accel < -1.0) and speed * speed <= 2.0 * STOP_DECEL * max(stop, 0.1):
+            decel = speed * speed / (2.0 * max(stop, 0.1))  # to rest at the sign
+            dist = np.minimum(speed * times - 0.5 * decel * times ** 2, stop) if decel > 0.0 else 0.0 * times
+            dist = np.maximum.accumulate(np.maximum(dist, 0.0))
+        elif accel < -1.0:  # braking: to rest
             dist = np.minimum(speed * times + 0.5 * accel * times ** 2, speed * speed / (-2.0 * accel))
         else:
             dist = speed * times
@@ -233,6 +266,15 @@ class Actors:
         y = np.interp(dist, travelled, xs[:, 1]) + fade * off[1]
         psi = np.interp(dist, travelled, psis)
         return times, x, y, psi
+
+    def _note_stop(self, track, t):
+        """A car at rest: if its stop sign is just ahead, it has stopped there (STOP_DONE)."""
+        wp = self.map.get_waypoint(track.actor.get_location(), project_to_road=True, lane_type=self.carla.LaneType.Driving)
+        if wp is None or wp.is_junction:
+            return
+        stop = self._stop_ahead(wp)
+        if stop is not None and stop <= STOP_DONE:
+            track.stopped_at_sign = t
 
     def _stays_out(self, track, actor, frame, ego_lanes):
         """Whether a vehicle has no intent to use the lanes the ego is using: on a lane of its own and going along it, at
@@ -296,7 +338,9 @@ class Actors:
                 a.parked = self._parked(track, t)
                 predicted = None
                 if track.kind == "vehicle" and speed >= 0.5:
-                    predicted = self._follow_lane(track, speed, track.accel())
+                    predicted = self._follow_lane(track, speed, track.accel(), t)
+                elif track.kind == "vehicle" and speed < 0.3 and not a.parked:
+                    self._note_stop(track, t)
             except RuntimeError:
                 gone.append(track.id)
                 continue

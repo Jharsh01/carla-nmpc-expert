@@ -18,8 +18,13 @@ void lead_profile(const std::vector<Lead>& leads, const std::vector<double>& tim
         const double t = times[k + 1];
         for (const Lead& l : leads) {  // the nearest at each step, and its speed
             const double s = sample(l.t, l.s_rear, t);
+            // its speed: centred, or just ahead where that is faster. A lead that is not in the lane yet is held 300 m
+            // on (merge.cpp, classify.cpp) and drops to where it comes in: across the drop the centred difference is
+            // negative, and the car ahead came out stopped as it came in, the speed asked for tapered to ~4 m/s
+            // (route 8, rollgate_r8 at 10.5 s: the ego slowed just as the car it was to follow went in)
             if (s < lead[k])
-                lead[k] = s, lead_speed[k] = std::max(0.0, (sample(l.t, l.s_rear, t + 0.05) - sample(l.t, l.s_rear, t - 0.05)) / 0.1);
+                lead[k] = s, lead_speed[k] = std::max({0.0, (sample(l.t, l.s_rear, t + 0.05) - sample(l.t, l.s_rear, t - 0.05)) / 0.1,
+                                                       (sample(l.t, l.s_rear, t + 0.15) - sample(l.t, l.s_rear, t + 0.05)) / 0.1});
         }
         // never asked to go back: a lead already nearer than the gap holds the car where it is (a plan that reverses
         // to restore it is not one the car can drive, and at standstill it leaves the solver crawling)
@@ -31,7 +36,7 @@ double behind_lead_speed(double v, double lead_s, double lead_v, double front, c
     if (!std::isfinite(lead_s)) return v;
     // the time gap, and the envelope to the lead's speed
     const double room = std::max(0.0, lead_s - opt.gap - front);
-    return std::min({v, room / opt.time_gap, std::sqrt(lead_v * lead_v + 2.0 * opt.a_ref * room)});
+    return std::min({v, opt.time_gap > 0.0 ? room / opt.time_gap : INF, std::sqrt(lead_v * lead_v + 2.0 * opt.a_ref * room)});
 }
 
 void stay_behind(Problem& pr, const Percept& p) {

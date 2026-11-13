@@ -18,6 +18,7 @@ add_library(nmpc STATIC
     src/constraint/stop.cpp
     src/constraint/crossing.cpp
     src/constraint/overtake.cpp
+    src/constraint/merge.cpp
     src/constraint/turn.cpp
     src/constraint/grip.cpp)
 target_include_directories(nmpc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

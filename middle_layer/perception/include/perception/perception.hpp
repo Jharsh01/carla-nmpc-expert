@@ -71,6 +71,17 @@ struct StopLine {
     double s = 0.0;  // along the route [m]
 };
 
+// A lane of the junction ahead that merges with the route (it ends in the lane the route leaves the junction by) or
+// crosses it, as the map has it (middle_layer/perception/sensors/map.py: Route.conflicts): where along the route the
+// two overlap, how far its traffic comes along it from the junction's edge to there, and how far up the road before
+// the junction that lane is seen. A car not seen may be coming just beyond.
+struct Conflict {
+    bool merge = false;
+    double s_lo = 0.0, s_hi = 0.0;  // [m]
+    double lead_in = 0.0;  // [m]
+    double sight = INF;  // [m]; INF: all of it that matters
+};
+
 struct Scene {
     double t = 0.0;  // [s]
     Ego ego;
@@ -87,6 +98,7 @@ struct Scene {
     // a blocker ahead, the overtake on that side is decided at once, gone round now if clear, else the car stops
     // where it is, as far back as it can see past the blocker from (nmpc/constraint/candidates.cpp).
     int asks_change = 0;
+    std::vector<Conflict> conflicts;  // of the junction the route turns at; empty: none, or not turning
 };
 
 // ---- the scene as interpreted
@@ -96,6 +108,7 @@ struct Track {
     const Actor* actor = nullptr;  // in the Scene sensed
     std::vector<double> t, s, e, ext_s, ext_e;
     double cos_rel = 1.0;  // of its heading relative to the route, now
+    double cos_end = 1.0;  // and at the end of its track, where it is then
     double speed = 0.0;  // now [m/s]
 };
 
@@ -109,7 +122,20 @@ struct Blocker {
     size_t track;  // into Percept::tracks
 };
 
+// A car joining the route's lane from a side road and going on along it (the stream the ego turns into at a
+// junction): not in the lane now, in it from t_in for as long as it is predicted, moving along the route there.
+// Before it is in, the ego either waits for it (then follows it: `lead`) or goes in ahead of it (constraint/merge).
+struct Merger {
+    int id = 0;
+    size_t track = 0;  // in Percept::tracks
+    double t_in = 0.0;  // [s]
+    double s_in = 0.0;  // where its rear is along the route as it comes in [m]
+    double speed = 0.0;  // along the route once in [m/s]
+    Lead lead;  // its rear from t_in on (far ahead before)
+};
+
 struct Percept {
+    const Path* route = nullptr;  // the path perceived along (the planner's; it outlives the Percept)
     Eigen::Matrix<double, NX, 1> z0;  // the ego in path coordinates
     double s0 = 0.0, v0 = 0.0, front0 = 0.0, rear0 = 0.0;  // where it is, its speed, its body's ends along the route
     std::vector<LaneSection> lanes;  // the Scene's, or the default lane
@@ -119,6 +145,9 @@ struct Percept {
     std::vector<Lead> leads;
     std::vector<Blocker> blockers;
     std::vector<Crosser> crossers;
+    std::vector<Merger> mergers;
+    std::vector<std::pair<size_t, double>> joining;  // tracks joining the lane behind the ego, and when [s]
+    std::vector<double> bend_s, bend_kappa;  // the route's curvature ahead of the car, every 2 m [m], [1/m]
     std::vector<Mover> movers;  // what is kept clear of as circles
     std::vector<Mover> moving;  // of those, the moving ones (less the parked cars and objects)
     std::vector<Mover> stay_out;  // the circles of the cars that stay out of the ego's lanes
