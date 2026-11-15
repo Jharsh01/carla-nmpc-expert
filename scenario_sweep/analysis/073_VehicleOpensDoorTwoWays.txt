@@ -1,0 +1,16 @@
+status: Completed score 60.0 route 100
+first moving t: 2.65  last moving t: 31.8  end t: 31.8  failed plans: 4 / 635
+
+## collisions_vehicle near t=22.05: Agent collided against object with type=vehicle.nissan.patrol_2021 and id=4708 at (x=4969.51, y=3646.486, z=159.584)
+  t= 19.75 v= 0.06 a=  0.38 base                         ok=1 hold=0 notes=blocker at s 51.4 m,blocker at s 61.7 m,blocker: oncoming traffic, wai | id4708 rel=(4.4,-2.4)
+  t= 20.00 v= 0.49 a=  1.81 base                         ok=1 hold=0 notes=
+  t= 20.25 v= 0.73 a=  1.02 base                         ok=1 hold=0 notes=
+  t= 20.50 v= 1.13 a=  1.60 base                         ok=1 hold=0 notes=
+  t= 20.75 v= 1.49 a=  1.49 base                         ok=1 hold=0 notes=blocker at s 50.7 m,blocker at s 60.9 m,blocker: oncoming traffic, wai | id4708 rel=(3.7,-2.4)
+  t= 21.00 v= 1.48 a=  0.29 base                         ok=1 hold=0 notes=
+  t= 21.25 v= 1.58 a=  0.33 base                         ok=1 hold=0 notes=
+  t= 21.50 v= 1.99 a=  1.44 borrow_left                  ok=1 hold=0 notes=
+  t= 21.75 v= 1.95 a=  0.28 base                         ok=1 hold=0 notes= | id4708 rel=(2.0,-2.4)
+  t= 22.00 v= 2.90 a=  3.40 base                         ok=1 hold=0 notes=
+  t= 22.25 v= 3.94 a=  3.80 base                         ok=1 hold=0 notes=
+  t= 22.50 v= 4.95 a=  4.13 base                         ok=1 hold=0 notes=

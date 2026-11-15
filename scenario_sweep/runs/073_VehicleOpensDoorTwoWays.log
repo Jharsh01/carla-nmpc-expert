@@ -1,0 +1,8 @@
+== bench2drive_73 (attempt 1/1)  06:33:37
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 30.0 s simulated in 100.6 s wall clock, 0.298x real time, 0 irregular ticks
+   Completed: score 60.0, route 100.0%, penalty 0.60, collisions_vehicle
+   video: 283 frames, 28.3 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/073_VehicleOpensDoorTwoWays/videos/73_VehicleOpensDoorTwoWays.mp4
+
+1 routes: driving score 60.00, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/073_VehicleOpensDoorTwoWays/res/merged.json

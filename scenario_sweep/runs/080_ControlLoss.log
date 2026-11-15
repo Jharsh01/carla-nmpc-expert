@@ -1,0 +1,8 @@
+== bench2drive_80 (attempt 1/1)  09:02:24
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 30.0 s simulated in 85.9 s wall clock, 0.349x real time, 0 irregular ticks
+   Failed - Simulation crashed (watchdog: ego at rest for 30 s): score 14.4, route 14.4%, penalty 1.00
+   video: 335 frames, 33.5 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/080_ControlLoss/videos/80_ControlLoss.mp4
+
+1 routes: driving score 14.37, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/080_ControlLoss/res/merged.json

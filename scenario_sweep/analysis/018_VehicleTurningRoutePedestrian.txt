@@ -1,0 +1,16 @@
+status: Completed score 80.0 route 100
+first moving t: 2.65  last moving t: 28.25  end t: 28.25  failed plans: 16 / 564
+
+## stop_infraction near t=17.4: Agent ran a stop with id=320 at (x=-1463.286, y=3922.998, z=363.7)
+  t= 15.00 v= 2.00 a=  2.74 cross                        ok=1 hold=0 notes=
+  t= 15.25 v= 2.88 a=  3.37 cross:3720                   ok=1 hold=0 notes=
+  t= 15.50 v= 2.74 a= -0.08 cross                        ok=1 hold=0 notes=
+  t= 15.75 v= 3.09 a=  1.18 base                         ok=1 hold=0 notes=switched from cross to base
+  t= 16.00 v= 2.89 a= -0.89 base                         ok=1 hold=0 notes=
+  t= 16.25 v= 2.33 a= -2.12 cross                        ok=1 hold=0 notes=
+  t= 16.50 v= 2.33 a= -0.35 cross                        ok=1 hold=0 notes=
+  t= 16.75 v= 3.26 a=  3.13 cross                        ok=1 hold=0 notes=crosser in the lane from 0.0 s to 0.5 s at s 23.2 m,cross: clear, from
+  t= 17.00 v= 4.60 a=  4.80 cross                        ok=1 hold=0 notes=
+  t= 17.25 v= 5.07 a=  1.69 cross:3722                   ok=1 hold=0 notes=
+  t= 17.50 v= 5.24 a=  0.56 cross:3722                   ok=1 hold=0 notes=
+  t= 17.75 v= 5.82 a=  2.49 cross:3722                   ok=1 hold=0 notes=crosser in the lane from 5.8 s to 7.0 s at s 14.4 m,cross: clear, from

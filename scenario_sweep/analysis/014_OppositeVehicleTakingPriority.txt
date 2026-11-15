@@ -1,0 +1,43 @@
+status: Failed - Agent deviated from the route score 22.5 route 59.53
+first moving t: 2.65  last moving t: 32.45  end t: 32.45  failed plans: 24 / 648
+
+## collisions_layout near t=27.1: Agent collided against object with type=static.fence and id=0 at (x=3612.491, y=2525.76, z=363.911)
+  t= 24.75 v= 0.95 a=  1.31 base                         ok=1 hold=0 notes=
+  t= 25.00 v= 1.31 a=  1.54 base                         ok=1 hold=0 notes=
+  t= 25.25 v= 1.64 a=  1.46 base                         ok=1 hold=0 notes=
+  t= 25.50 v= 1.78 a=  0.63 base                         ok=1 hold=0 notes=
+  t= 25.75 v= 0.43 a= -2.73 base                         ok=1 hold=0 notes=
+  t= 26.00 v= 0.56 a=  0.08 base                         ok=1 hold=0 notes=
+  t= 26.25 v= 1.40 a=  3.10 base                         ok=1 hold=0 notes=
+  t= 26.50 v= 2.67 a=  5.06 base                         ok=1 hold=0 notes=
+  t= 26.75 v= 4.45 a=  6.87 base                         ok=1 hold=0 notes=
+  t= 27.00 v= 5.66 a=  4.86 base                         ok=1 hold=0 notes=
+  t= 27.25 v= 4.03 a= -4.60 base                         ok=1 hold=0 notes=
+  t= 27.50 v= 4.01 a= -1.03 base                         ok=1 hold=0 notes=
+
+## collisions_vehicle near t=19.25: Agent collided against object with type=vehicle.carlamotors.firetruck and id=3696 at (x=3601.127, y=2520.575, z=363.688)
+  t= 16.75 v= 5.20 a=  7.13 cross:3717                   ok=1 hold=0 notes=crosser in the lane from 2.2 s to 4.5 s at s 23.4 m,crosser in the lan | id3696 rel=(5.7,-40.7)
+  t= 17.00 v= 6.03 a=  3.41 cross                        ok=1 hold=0 notes=
+  t= 17.25 v= 8.09 a=  7.43 cross                        ok=1 hold=0 notes=
+  t= 17.50 v= 9.05 a=  3.35 cross                        ok=1 hold=0 notes=
+  t= 17.75 v= 9.77 a=  2.50 merge:3696                   ok=1 hold=0 notes=merging in at 1.6 s at s 16.2 m, 16.7 m/s,crosser in the lane from 1.8 | id3696 rel=(-4.3,-29.2)
+  t= 18.00 v= 9.50 a= -0.30 merge:3696                   ok=1 hold=0 notes=
+  t= 18.25 v= 7.70 a= -5.33 base                         ok=0 hold=1 notes=
+  t= 18.50 v= 6.88 a= -3.26 base                         ok=1 hold=0 notes=
+  t= 18.75 v= 2.57 a=-16.85 cross                        ok=0 hold=1 notes=merging in at 4.6 s at s 15.4 m, 5.2 m/s,crosser in the lane from 0.5  | id3696 rel=(6.0,-12.8)
+  t= 19.00 v= 0.00 a= -8.74 base                         ok=1 hold=0 notes=
+  t= 19.25 v= 0.18 a= -0.90 base                         ok=1 hold=0 notes=
+  t= 19.50 v= 2.16 a=  3.82 base                         ok=0 hold=1 notes=
+  t= 19.75 v= 0.00 a= 12.64 base                         ok=0 hold=1 notes=switched from cross to base | id3696 rel=(3.0,-2.5)
+
+## route_dev near t=32.45: Agent deviated from the route at (x=3629.157, y=2524.736, z=364.131)
+  t= 30.00 v= 0.22 a=  0.55 base                         ok=1 hold=0 notes=
+  t= 30.25 v= 1.21 a=  3.38 base                         ok=1 hold=0 notes=
+  t= 30.50 v= 1.98 a=  2.91 base                         ok=1 hold=0 notes=
+  t= 30.75 v= 2.01 a=  0.82 base                         ok=1 hold=0 notes=
+  t= 31.00 v= 3.05 a=  4.03 base                         ok=1 hold=0 notes=
+  t= 31.25 v= 4.41 a=  5.02 base                         ok=1 hold=0 notes=
+  t= 31.50 v= 5.05 a=  2.77 base                         ok=1 hold=0 notes=
+  t= 31.75 v= 5.16 a=  0.60 base                         ok=1 hold=0 notes=
+  t= 32.00 v= 5.70 a=  1.17 base                         ok=1 hold=0 notes=
+  t= 32.25 v= 7.18 a=  4.89 base                         ok=1 hold=0 notes=

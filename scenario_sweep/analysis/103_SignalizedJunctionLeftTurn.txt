@@ -1,0 +1,17 @@
+status: Failed - Simulation crashed (watchdog: ego at rest for 30 s) score 28.6 route 47.61
+first moving t: 2.65  last moving t: 15.45  end t: 45.6  failed plans: 0 / 911
+
+## collisions_vehicle near t=14.75: Agent collided against object with type=vehicle.mini.cooper_s_2021 and id=3873 at (x=2491.111, y=4889.965, z=367.364)
+  t= 12.25 v= 1.46 a=  2.95 cross:3875                   ok=1 hold=0 notes=
+  t= 12.50 v= 2.67 a=  4.57 cross:3875                   ok=1 hold=0 notes=
+  t= 12.75 v= 4.44 a=  6.63 cross:3875                   ok=1 hold=0 notes=crosser in the lane from 0.0 s to 1.2 s at s 24.0 m,crosser in the lan | id3873 rel=(24.1,-18.4)
+  t= 13.00 v= 5.46 a=  3.94 cross:3875                   ok=1 hold=0 notes=
+  t= 13.25 v= 6.71 a=  6.10 cross:3875                   ok=1 hold=0 notes=
+  t= 13.50 v= 7.80 a=  4.74 cross:3875                   ok=1 hold=0 notes=
+  t= 13.75 v= 8.67 a=  3.65 cross:3875                   ok=1 hold=0 notes=crosser in the lane from 0.0 s to 0.2 s at s 17.5 m,cut-in from 8.0 s  | id3873 rel=(16.8,-9.9)
+  t= 14.00 v= 9.20 a=  2.34 cross:3875                   ok=1 hold=0 notes=
+  t= 14.25 v= 9.41 a=  1.02 cross:3875                   ok=1 hold=0 notes=
+  t= 14.50 v= 9.25 a= -0.45 cross:3875                   ok=1 hold=0 notes=
+  t= 14.75 v= 9.01 a= -0.98 cross:3875                   ok=1 hold=0 notes=crosser in the lane from 0.0 s to 1.0 s at s 10.1 m,crosser in the lan | id3873 rel=(4.9,-2.0)
+  t= 15.00 v= 2.59 a= -7.27 cross                        ok=1 hold=0 notes=
+  t= 15.25 v= 3.21 a= -0.03 cross:3875                   ok=1 hold=0 notes=

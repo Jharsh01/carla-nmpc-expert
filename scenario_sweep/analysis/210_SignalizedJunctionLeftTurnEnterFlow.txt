@@ -1,0 +1,16 @@
+status: Failed - Simulation crashed (watchdog: ego at rest for 30 s) score 29.9 route 49.89
+first moving t: 2.65  last moving t: 15.9  end t: 46.05  failed plans: 4 / 920
+
+## collisions_vehicle near t=15.55: Agent collided against object with type=vehicle.chevrolet.impala and id=172 at (x=200.473, y=-309.497, z=0.021)
+  t= 13.25 v= 1.77 a= -0.81 cross:172                    ok=1 hold=0 notes=
+  t= 13.50 v= 1.70 a= -0.40 cross:172                    ok=1 hold=0 notes=
+  t= 13.75 v= 2.17 a=  1.70 base                         ok=1 hold=0 notes=switched from cross:172 to base
+  t= 14.00 v= 2.82 a=  2.04 base                         ok=1 hold=0 notes=
+  t= 14.25 v= 2.45 a= -1.08 base                         ok=1 hold=0 notes=
+  t= 14.50 v= 1.89 a= -2.07 base                         ok=1 hold=0 notes=
+  t= 14.75 v= 0.00 a= -6.11 cross                        ok=1 hold=0 notes=crosser in the lane from 1.0 s to 2.0 s at s 10.7 m,cross: clear, from | id172 rel=(1.7,-10.6)
+  t= 15.00 v= 0.00 a= -1.06 merge:172                    ok=1 hold=0 notes=
+  t= 15.25 v= 0.40 a=  1.34 merge:172                    ok=1 hold=0 notes=
+  t= 15.50 v= 1.29 a=  3.33 merge:172                    ok=1 hold=0 notes=
+  t= 15.75 v= 1.34 a= -2.91 base                         ok=1 hold=0 notes= | id172 rel=(0.8,-3.3)
+  t= 16.00 v= 0.01 a= -5.45 base                         ok=0 hold=1 notes=

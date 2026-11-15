@@ -1,0 +1,8 @@
+== bench2drive_01 (attempt 1/1)  05:53:12
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 20.0 s simulated in 89.9 s wall clock, 0.222x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 204 frames, 20.4 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/001_ParkedObstacle/videos/01_ParkedObstacle.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/001_ParkedObstacle/res/merged.json

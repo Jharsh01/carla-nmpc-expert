@@ -1,0 +1,8 @@
+== bench2drive_04 (attempt 1/1)  06:07:32
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 30.0 s simulated in 102.9 s wall clock, 0.291x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 282 frames, 28.2 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/004_ConstructionObstacleTwoWays/videos/04_ConstructionObstacleTwoWays.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/004_ConstructionObstacleTwoWays/res/merged.json

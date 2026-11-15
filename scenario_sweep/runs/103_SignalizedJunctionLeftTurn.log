@@ -1,0 +1,8 @@
+== bench2drive_103 (attempt 1/1)  07:09:36
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 40.0 s simulated in 226.3 s wall clock, 0.177x real time, 0 irregular ticks
+   Failed - Simulation crashed (watchdog: ego at rest for 30 s): score 28.6, route 47.6%, penalty 0.60, collisions_vehicle
+   video: 407 frames, 40.7 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/103_SignalizedJunctionLeftTurn/videos/103_SignalizedJunctionLeftTurn.mp4
+
+1 routes: driving score 28.57, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/103_SignalizedJunctionLeftTurn/res/merged.json

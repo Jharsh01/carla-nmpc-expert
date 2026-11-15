@@ -1,0 +1,8 @@
+== bench2drive_29 (attempt 1/1)  08:56:10
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 10.0 s simulated in 34.9 s wall clock, 0.287x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 143 frames, 14.3 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/029_VanillaNonSignalizedTurnEncounterStopsign/videos/29_VanillaNonSignalizedTurnEncounterStopsign.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/029_VanillaNonSignalizedTurnEncounterStopsign/res/merged.json

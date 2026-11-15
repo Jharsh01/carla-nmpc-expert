@@ -1,0 +1,8 @@
+== bench2drive_26 (attempt 1/1)  08:52:28
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 75 frames, 7.5 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/026_VanillaNonSignalizedTurn/videos/26_VanillaNonSignalizedTurn.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/026_VanillaNonSignalizedTurn/res/merged.json

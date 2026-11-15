@@ -1,0 +1,8 @@
+== bench2drive_193 (attempt 1/1)  09:00:04
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 10.0 s simulated in 25.6 s wall clock, 0.390x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 106 frames, 10.6 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/193_T_Junction/videos/193_T_Junction.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/193_T_Junction/res/merged.json

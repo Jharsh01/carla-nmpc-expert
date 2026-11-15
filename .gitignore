@@ -22,3 +22,6 @@ external
 
 # outputs
 results/
+
+# scenario sweep raw run outputs (large)
+scenario_sweep/runs/*/

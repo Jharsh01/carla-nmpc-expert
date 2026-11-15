@@ -1,0 +1,8 @@
+== bench2drive_208 (attempt 1/1)  07:25:20
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 20.0 s simulated in 56.7 s wall clock, 0.353x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 102 frames, 10.2 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/208_NonSignalizedJunctionLeftTurnEnterFlow/videos/208_NonSignalizedJunctionLeftTurnEnterFlow.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/208_NonSignalizedJunctionLeftTurnEnterFlow/res/merged.json

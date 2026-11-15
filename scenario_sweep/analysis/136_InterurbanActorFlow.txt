@@ -1,0 +1,16 @@
+status: Failed - Simulation crashed (watchdog: route over 70 s of simulation time) score 57.2 route 88.57
+first moving t: 2.65  last moving t: 59.2  end t: 70.0  failed plans: 72 / 1399
+
+## collisions_layout near t=59.2: Agent collided against object with type=static.terrain and id=0 at (x=-2586.331, y=5911.489, z=157.332)
+  t= 56.75 v= 0.00 a= -0.15 base                         ok=1 hold=0 notes=crosser in the lane from 0.0 s to 0.5 s at s 17.5 m
+  t= 57.00 v= 0.00 a= -0.08 base                         ok=1 hold=0 notes=
+  t= 57.25 v= 0.00 a= -0.07 base                         ok=1 hold=0 notes=
+  t= 57.50 v= 0.04 a=  0.11 base                         ok=1 hold=0 notes=
+  t= 57.75 v= 0.06 a=  0.03 base                         ok=1 hold=0 notes=
+  t= 58.00 v= 0.29 a=  0.95 base                         ok=1 hold=0 notes=
+  t= 58.25 v= 0.52 a=  0.67 base                         ok=1 hold=0 notes=
+  t= 58.50 v= 0.59 a=  0.26 base                         ok=1 hold=0 notes=
+  t= 58.75 v= 0.95 a=  1.36 base                         ok=1 hold=0 notes=
+  t= 59.00 v= 1.82 a=  2.96 base                         ok=1 hold=0 notes=
+  t= 59.25 v= 0.00 a=  0.40 base                         ok=1 hold=0 notes=
+  t= 59.50 v= 0.00 a= -3.55 base                         ok=0 hold=1 notes=

@@ -1,0 +1,16 @@
+status: Completed score 50.0 route 100
+first moving t: 2.65  last moving t: 17.45  end t: 17.45  failed plans: 4 / 348
+
+## collisions_pedestrian near t=9.6: Agent collided against object with type=walker.pedestrian.0013 and id=4710 at (x=3531.233, y=880.487, z=176.955)
+  t=  7.25 v= 8.21 a= -1.64 base                         ok=1 hold=0 notes=
+  t=  7.50 v= 7.46 a= -2.77 base                         ok=1 hold=0 notes=
+  t=  7.75 v= 7.50 a= -0.35 base                         ok=1 hold=0 notes= | id4710 rel=(20.3,-2.8)
+  t=  8.00 v= 8.07 a=  1.45 base                         ok=1 hold=0 notes=
+  t=  8.25 v= 9.68 a=  5.03 base                         ok=1 hold=0 notes=
+  t=  8.50 v= 9.89 a=  1.35 cross                        ok=0 hold=1 notes=
+  t=  8.75 v= 9.83 a= -0.09 cross                        ok=1 hold=0 notes=crosser in the lane from 0.2 s to 2.0 s at s 25.6 m,cross: no stopping | id4710 rel=(11.1,-1.9)
+  t=  9.00 v= 9.76 a= -0.30 cross                        ok=1 hold=0 notes=
+  t=  9.25 v= 9.74 a= -0.28 cross                        ok=1 hold=0 notes=
+  t=  9.50 v= 9.23 a= -2.06 cross                        ok=1 hold=0 notes=
+  t=  9.75 v= 7.95 a= -4.48 cross                        ok=1 hold=0 notes=crosser in the lane from 0.0 s to 1.2 s at s 17.3 m,cross: no stopping | id4710 rel=(2.3,-0.1)
+  t= 10.00 v= 7.77 a= -1.29 cross                        ok=1 hold=0 notes=

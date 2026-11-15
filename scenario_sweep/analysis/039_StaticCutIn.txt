@@ -1,0 +1,30 @@
+status: Completed score 36.0 route 100
+first moving t: 2.75  last moving t: 17.2  end t: 17.2  failed plans: 0 / 343
+
+## collisions_vehicle near t=9.8: Agent collided against object with type=vehicle.chevrolet.impala and id=3708 at (x=-1638.856, y=6475.447, z=372.468)
+  t=  7.50 v=17.30 a=  0.02 base                         ok=1 hold=0 notes=
+  t=  7.75 v=16.96 a= -1.20 base                         ok=1 hold=0 notes= | id3708 rel=(11.8,3.4)
+  t=  8.00 v=16.63 a= -1.35 base                         ok=1 hold=0 notes=
+  t=  8.25 v=16.30 a= -1.43 base                         ok=1 hold=0 notes=
+  t=  8.50 v=15.63 a= -2.90 base                         ok=1 hold=0 notes=
+  t=  8.75 v=14.67 a= -3.55 base                         ok=1 hold=0 notes= | id3708 rel=(3.7,3.4)
+  t=  9.00 v=12.91 a= -6.33 base                         ok=1 hold=0 notes=
+  t=  9.25 v=11.63 a= -5.29 base                         ok=1 hold=0 notes=
+  t=  9.50 v=10.35 a= -5.85 base                         ok=1 hold=0 notes=
+  t=  9.75 v= 8.66 a= -6.47 base                         ok=1 hold=0 notes= | id3708 rel=(-0.2,3.4)
+  t= 10.00 v= 7.45 a= -5.13 base                         ok=1 hold=0 notes=
+  t= 10.25 v= 5.90 a= -5.94 base                         ok=1 hold=0 notes=
+
+## collisions_vehicle near t=10.6: Agent collided against object with type=vehicle.ford.crown and id=3698 at (x=-1643.887, y=6476.725, z=372.425)
+  t=  8.25 v=16.30 a= -1.43 base                         ok=1 hold=0 notes=
+  t=  8.50 v=15.63 a= -2.90 base                         ok=1 hold=0 notes=
+  t=  8.75 v=14.67 a= -3.55 base                         ok=1 hold=0 notes= | id3698 rel=(14.6,-1.7)
+  t=  9.00 v=12.91 a= -6.33 base                         ok=1 hold=0 notes=
+  t=  9.25 v=11.63 a= -5.29 base                         ok=1 hold=0 notes=
+  t=  9.50 v=10.35 a= -5.85 base                         ok=1 hold=0 notes=
+  t=  9.75 v= 8.66 a= -6.47 base                         ok=1 hold=0 notes= | id3698 rel=(5.0,0.2)
+  t= 10.00 v= 7.45 a= -5.13 base                         ok=1 hold=0 notes=
+  t= 10.25 v= 5.90 a= -5.94 base                         ok=1 hold=0 notes=
+  t= 10.50 v= 5.59 a= -2.03 base                         ok=1 hold=0 notes=
+  t= 10.75 v= 3.09 a=-10.80 base                         ok=1 hold=0 notes= | id3698 rel=(3.7,-1.2)
+  t= 11.00 v= 1.95 a= -4.43 base                         ok=1 hold=0 notes=

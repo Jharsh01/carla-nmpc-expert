@@ -1,0 +1,8 @@
+== bench2drive_32 (attempt 1/1)  06:12:34
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 20.0 s simulated in 69.8 s wall clock, 0.286x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 159 frames, 15.9 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/032_Accident/videos/32_Accident.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/032_Accident/res/merged.json

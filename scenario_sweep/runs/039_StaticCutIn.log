@@ -1,0 +1,8 @@
+== bench2drive_39 (attempt 1/1)  06:52:00
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 10.0 s simulated in 43.0 s wall clock, 0.232x real time, 0 irregular ticks
+   Completed: score 36.0, route 100.0%, penalty 0.36, collisions_vehicle
+   video: 143 frames, 14.3 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/039_StaticCutIn/videos/39_StaticCutIn.mp4
+
+1 routes: driving score 36.00, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/039_StaticCutIn/res/merged.json

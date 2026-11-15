@@ -1,0 +1,8 @@
+== bench2drive_14 (attempt 1/1)  08:08:16
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 30.0 s simulated in 91.5 s wall clock, 0.328x real time, 0 irregular ticks
+   no result after 1 attempts: see /home/harsh/carla-expert-nmpc/scenario_sweep/runs/014_OppositeVehicleTakingPriority/out/bench2drive_14.log
+   video: 206 frames, 20.6 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/014_OppositeVehicleTakingPriority/videos/14_OppositeVehicleTakingPriority.mp4
+
+1 routes: driving score 22.45, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/014_OppositeVehicleTakingPriority/res/merged.json

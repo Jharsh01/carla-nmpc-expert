@@ -1,0 +1,8 @@
+== bench2drive_114 (attempt 1/1)  08:46:29
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 30.0 s simulated in 173.6 s wall clock, 0.173x real time, 0 irregular ticks
+   Failed - Simulation crashed (watchdog: ego at rest for 30 s): score 0.0, route 0.0%, penalty 1.00
+   video: 247 frames, 24.7 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/114_VanillaSignalizedTurnEncounterGreenLight/videos/114_VanillaSignalizedTurnEncounterGreenLight.mp4
+
+1 routes: driving score 0.00, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/114_VanillaSignalizedTurnEncounterGreenLight/res/merged.json

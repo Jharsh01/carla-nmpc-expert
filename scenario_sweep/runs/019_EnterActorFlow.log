@@ -1,0 +1,8 @@
+== bench2drive_19 (attempt 1/1)  07:58:13
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 40.0 s simulated in 161.9 s wall clock, 0.247x real time, 0 irregular ticks
+   Failed - Simulation crashed (watchdog: ego at rest for 30 s): score 26.7, route 26.7%, penalty 1.00
+   video: 333 frames, 33.3 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/019_EnterActorFlow/videos/19_EnterActorFlow.mp4
+
+1 routes: driving score 26.69, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/019_EnterActorFlow/res/merged.json

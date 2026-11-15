@@ -1,0 +1,8 @@
+== bench2drive_113 (attempt 1/1)  08:26:01
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 10.0 s simulated in 39.5 s wall clock, 0.253x real time, 0 irregular ticks
+   Completed: score 100.0, route 100.0%, penalty 1.00
+   video: 185 frames, 18.5 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/113_PedestrianCrossing/videos/113_PedestrianCrossing.mp4
+
+1 routes: driving score 100.00, success rate 100.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/113_PedestrianCrossing/res/merged.json

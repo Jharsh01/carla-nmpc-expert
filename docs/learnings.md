@@ -492,6 +492,15 @@ whenever a run, a test or a dead end teaches something not obvious from the code
     with the CPU idle: merge_into_stream@local p95 46 -> 60 ms, merge_from_rest_1 38 -> 106 ms (and 223 -> 198 m
     travelled). The cross solve seeded from the judged drive (`seed_v_ref`) is most of the second (52.6 ms without it);
     junction_cut and junction_mu are neither; the first is not found yet (two sessions of uncommitted changes apart).
+- **Sweep of 39 types, one route each (15 Nov, b012cdd; scenario_sweep/report.md, videos there).** 28 of 39 at
+  100 %, mean 82.2 (highway and yielding types left out). Obstacles 10/11, cut-ins 4/5, junctions 7/12, pedestrians
+  3/5, rules-only 4/6. Failures: 103 and 210 (left turn, hit by a car already in the conflict zone; the cross check
+  looks at one car), 14 (hit by the fire truck taking priority; passed on 15 Nov earlier, so not repeatable), 19 (no
+  gap ever accepted in EnterActorFlow), 136 (off road, out of time; first try hung at 19.4 s like route 8), 39 (63 km/h
+  past a stopped queue, cut-in hit us), 73 (open door not in the parked car's box), 63 (pedestrian: "cross: no
+  stopping" so it did not brake at the limit), 18 (ran a stop sign on a "cross: clear"), 114 (a stop gate 5.9 m ahead
+  never cleared at a green light; gate source not logged), 80 (ControlLoss debris treated as blockers, waited to go
+  round). Video time != sim time: frames are fewer than ticks; sim t = video t * run length / video length.
 - **Seven untried types, one route each (15 Nov, final code).** 100 %: route 2 HazardAtSideLane, 79 HardBreakRoute, 14
   OppositeVehicleTakingPriority, 122 DynamicObjectCrossing, 25 VanillaSignalizedTurnEncounterRedLight. Route 103
   (SignalizedJunctionLeftTurn) 26.9 %: away at green at 12.2 s, 10 m/s and still straight 17 m on, a new crosser

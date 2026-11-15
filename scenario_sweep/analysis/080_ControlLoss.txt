@@ -1,0 +1,19 @@
+status: Failed - Simulation crashed (watchdog: ego at rest for 30 s) score 14.4 route 14.37
+first moving t: 2.65  last moving t: 8.8  end t: 39.75  failed plans: 0 / 794
+
+no located infraction; last 3 s:
+  t= 36.80 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 37.00 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 37.20 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 37.40 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 37.60 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 37.80 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 38.00 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 38.20 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 38.40 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 38.60 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 38.80 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 39.00 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 39.20 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 39.40 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None
+  t= 39.60 v= 0.00 a_ref=-1.00 base                         ok=1 hold=0 notes= gates=None

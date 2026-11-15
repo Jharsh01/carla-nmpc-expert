@@ -1,0 +1,8 @@
+== bench2drive_18 (attempt 1/1)  08:35:12
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 20.0 s simulated in 70.9 s wall clock, 0.282x real time, 0 irregular ticks
+   Completed: score 80.0, route 100.0%, penalty 0.80, stop_infraction
+   video: 210 frames, 21.0 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/018_VehicleTurningRoutePedestrian/videos/18_VehicleTurningRoutePedestrian.mp4
+
+1 routes: driving score 80.00, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/018_VehicleTurningRoutePedestrian/res/merged.json

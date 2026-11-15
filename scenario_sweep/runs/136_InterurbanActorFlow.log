@@ -1,0 +1,8 @@
+== bench2drive_136 (attempt 1/1)  07:47:14
+   [92mSync: synchronous_mode=True, fixed_delta_seconds=0.05 (ok)[0m
+   Sync: 60.0 s simulated in 165.1 s wall clock, 0.363x real time, 0 irregular ticks
+   Failed - Simulation crashed (watchdog: route over 70 s of simulation time): score 57.2, route 88.6%, penalty 0.65, collisions_layout, outside_route_lanes
+   video: 494 frames, 49.4 s: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/136_InterurbanActorFlow/videos/136_InterurbanActorFlow.mp4
+
+1 routes: driving score 57.16, success rate 0.0 %  (Bench2Drive's numbers are over all 220 routes)
+merged results: /home/harsh/carla-expert-nmpc/scenario_sweep/runs/136_InterurbanActorFlow/res/merged.json
