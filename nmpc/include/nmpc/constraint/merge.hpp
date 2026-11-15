@@ -6,6 +6,7 @@
 // candidate's chasers: the plan keeps the ego's rear ahead of their fronts.
 #pragma once
 
+#include <functional>
 #include <string>
 
 #include "nmpc/constraint/candidates.hpp"
@@ -18,7 +19,9 @@ namespace ex {
 void merge(const Constraints& c, const Percept& p, const Scene& scene, const std::string& last_label,
            const Problem& base, Constraints::Result& out);
 
-// The gate before the mergers' entry while they come in, and their leads after: waiting for all of them.
-void wait_for_mergers(Problem& pr, const Percept& p, const ConstraintOptions& opt);
+// The gate before the mergers' entry while they come in, and their leads after: waiting for all of them, but those
+// `clear_of` says the ego is through ahead of (crossing.cpp: on its judged drive).
+void wait_for_mergers(Problem& pr, const Percept& p, const ConstraintOptions& opt,
+                      const std::function<bool(const Merger&)>& clear_of = {});
 
 }  // namespace ex

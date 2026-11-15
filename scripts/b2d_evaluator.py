@@ -183,8 +183,13 @@ _Popen = subprocess.Popen
 def _popen(cmd, *args, **kwargs):
     if isinstance(cmd, str) and "-graphicsadapter=" in cmd and "kill -9" in cmd:
         cmd = kill_servers_cmd(base)
-    elif isinstance(cmd, str) and "CarlaUE4.sh" in cmd and cpus.cpus("carla"):
-        cmd = f"taskset -c {','.join(map(str, sorted(cpus.cpus('carla'))))} {cmd}"
+    elif isinstance(cmd, str) and "CarlaUE4.sh" in cmd:
+        # CARLA_QUALITY=Low|Epic: the server's rendering quality (unset: CARLA's default, Epic). Route 10, Epic:
+        # the server took 7.3 GB of GPU memory at its peak (14 Nov)
+        if os.environ.get("CARLA_QUALITY"):
+            cmd = cmd.replace("CarlaUE4.sh", f"CarlaUE4.sh -quality-level={os.environ['CARLA_QUALITY']}", 1)
+        if cpus.cpus("carla"):
+            cmd = f"taskset -c {','.join(map(str, sorted(cpus.cpus('carla'))))} {cmd}"
     return _Popen(cmd, *args, **kwargs)
 
 

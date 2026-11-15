@@ -24,6 +24,8 @@ HORIZON, STEP = 5.0, 0.25  # [s] of each predicted trajectory
 # merger only 3.5 s before it came in, when the ego, rolling up at 5 m/s, could no longer time its arrival to a gap,
 # and stopped. Beyond the NMPC's own horizon (5 s) only the merge's check and the classes read it.
 LANE_HORIZON = 8.0  # [s]
+# At a fork the branch is chosen by its heading this far on [m] (_follow_lane)
+BRANCH_LOOK = 8.0
 # Bench2Drive spawns the parked cars along the route as static.prop.mesh actors with car meshes
 # (leaderboard/scenarios/route_scenario.py, spawn_parked_vehicles), whose bounding boxes CARLA gets wrong (a 5 m
 # Charger reports 3.0 x 3.9 m; on Town12 they came out 2.0 x 4.3 m, a car turned sideways): taken as parked cars of
@@ -251,7 +253,18 @@ class Actors:
             nxt = cur.next(2.0)
             if not nxt:
                 break
-            cur = min(nxt, key=lambda w: abs((w.transform.rotation.yaw - cur.transform.rotation.yaw + 180.0) % 360.0 - 180.0))
+            if len(nxt) > 1:
+                # a fork (into a junction): the branch whose heading BRANCH_LOOK on is nearest the car's own. 2 m in,
+                # a turn's lane is still nearly straight, and on route 10 the oncoming cars, which go straight on,
+                # were each predicted to turn left across the ego's nose until 10 m off (mug_r10): with a car every
+                # 1.6-2.6 s no gap was ever clear
+                def turn(w):
+                    ahead = w.next(BRANCH_LOOK)
+                    w = ahead[0] if ahead else w
+                    return abs((w.transform.rotation.yaw - yaw + 180.0) % 360.0 - 180.0)
+                cur = min(nxt, key=turn)
+            else:
+                cur = nxt[0]
             points.append(cur)
             travelled.append(travelled[-1] + 2.0)
         if len(points) < 2:

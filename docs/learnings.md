@@ -354,6 +354,150 @@ whenever a run, a test or a dead end teaches something not obvious from the code
   the NMPC then trailed that drive at 2-3.7 m/s^2 (w_accel, and w_lat growing with v^4 in the bend), losing each gap;
   (8) a 1 m give on yield gates moved with the car each plan and it crept into the stream's lane (fixed). Also: the
   junction slack in map.py's band made the oncoming lane beside it overlap; it now widens only the corridor.
+- **PDM-Lite's route 10 tick by tick** (~/b2d_results/pdm_lite/10_NonSignalizedJunctionLeftTurn/steps.csv, 14 Nov).
+  It reaches the stop line at 10 m/s, brakes late and rolls 1.3 m past it before a crosser (audi, 36 m off) stops it
+  at 4.85 s; being at rest there satisfies RunningStopTest. Then it probes: each time the stop sign's creep asks
+  1.2 m/s the car moves 0.02-1.3 m, its rolled box meets a crosser 36 m off (10 m/s, ~3.5 s away) and it brakes
+  hard; at rest the hazard clears when that crosser is 20-25 m off. Three crossers (audi, mini, lincoln), ~6.6 s
+  stopped, 1.3 m crept in all. When clear (10.45 s) it goes 0.3 -> 10 m/s in 2.0 s (7 m/s^2, peaks 12), the stop
+  sign releases at 4.6 m/s, and it takes the left turn at a steady 10 m/s with yaw rate x speed up to 18 m/s^2
+  (radius ~5.5 m): turning 1.4 s after launch, square to the new road 2.8 s after, out of the junction at 13.45 s. Our 0.5 g limit
+  cannot follow that line at that speed; matching its timing needs the gap judged for a slower turn.
+- **In a junction only grip limits the bend now** (14 Nov, the user's call). `LaneSection::junction` (from the map's
+  `is_junction`, map.py) goes onto the corridor (`Corridor::junction`); there the speed asked for in bends is
+  sqrt(mu g / kappa) (framework.cpp), and cross()/merge()'s judged drives take junction bends at mu g too, not
+  `merge_a_lat`. Outside junctions `a_lat_ref` (3) stays. The friction circle (grip.cpp) is the only hard limit;
+  w_lat is still a cost (0.05 in cross problems). Offline, tight_turn_j_* (route 8's 12.5 m bend marked a junction):
+  top speed in the bend 8.8 -> 10.2-10.4 m/s, out of it 4.3 -> 3.4-3.5 s, peak a_lat 8.3 (mu g 8.8). PDM-Lite's
+  18 m/s^2 is still twice what mu 0.9 allows: on route 10's ~5.5 m radius that is about 7 m/s, not its 10.
+  A first try keyed "junction" on "no road edges" and the synthetic scenarios (no edges anywhere) took `curve` at
+  5.9 m/s^2, 0.31 m off centre: hence the explicit flag. Ignoring the ego at rest in the crossing check was already
+  in cross() (a moment counts only once the judged front is 0.2 m on from where it stands).
+- **Route 10 with junction bends at mu g (mug_r10, one run): 41.0 %, watchdog, no collision** (35-41 % before).
+  The ego came to rest at 16.2 s 8 m past where PDM-Lite waits (its front ~2 m short of where its left turn
+  crosses the oncoming lane) and stood there to the end. The oncoming lane carries a car every 1.6-2.6 s at
+  10 m/s (16 cars past the conflict point from 17.3 to 45.7 s). Each was predicted (actors.py `_follow_lane`) to
+  turn left across the ego's nose until about 10 m off, then straight on; every one went straight. The branch at a
+  fork was chosen by yaw 2 m in, where a turn's lane is still nearly straight. One gap was judged clear (29.75 s,
+  ahead of 3748) and dropped at the next plan. Now chosen by the heading `BRANCH_LOOK` 8 m along each branch
+  against the car's own.
+- **Route 10 after the branch fix (14 Nov, one run each).** branch_r10 35.5 %, a stop infraction: the cars from the
+  right going straight on are now (rightly) a merge stream into the lane the ego turns into, and merge() backed up
+  for its 15 m run-up (route 8's), out of the stop sign's zone; it came back without a valid stop and backed up
+  again. Now no backing up for a run-up near a stop sign or with crossers (merge.cpp). noback_r10 29.2 %: no
+  reversing, at rest 2.6 m behind PDM-Lite's spot for 60 s; every earlier hold failed with the drive crept up to the
+  gate (front 10.5 m on), its box meeting the next car there. From rest near the gate the judged drive now stands
+  where it is and then launches, as PDM-Lite (crossing.cpp `drive_from`). standhold_r10 29.2 %: still at rest from
+  24 s. What holds it is real: the oncoming lane, which the left turn crosses, carries a car every ~1.6 s at 10 m/s
+  (16 m apart, ~1.1 s free at a point); from rest 10 m short of that lane the ego needs ~2.3 s to be across. The
+  standing hold also kept the car at its spawn 8 s (35 m back): it now applies only within 12 m of the gate (not
+  yet run). Open: how PDM-Lite found a gap (3 crossers, 6.6 s): a sparser flow then, or its 2 s forecast.
+- **Route 10, PDM-Lite-style gap acceptance and waiting nearer (14 Nov, one run each, all no collision unless said).**
+  - pdmgap_r10 39.8 %: `cross_forecast` 2 s, `cross_buffer` 0, and the ego waits at the furthest point its box stays
+    `cross_wait_margin` clear of every crosser (`s_hold`, crossing.cpp): it now waits at the oncoming lane's edge.
+    The window counted from now let a hold of 1.4 s ignore a car due at 2.7 s: now from the hold (t_go + 2 s).
+  - pdmgap2_r10 39.8 %: 32 plans said go now and none went. Waiting to turn, the wheels had been turned in place
+    plan after plan to 0.94 rad (max 0.95); from there the plan backs off while unwinding them (replayed offline:
+    0.94 -> 0, -0.4, 0.0, 1.7 m/s every 0.4 s; 0.45 -> 0, 0.8, 2.6, 4.6). The agent now holds the wheels while
+    planned at rest and stopped (simlingo_nmpc_agent.py).
+  - steerhold_r10 41.0 %: it set off but each start was dropped after 0.2-0.4 s: the car gained 0.48 m/s in 0.4 s
+    (jerk limit, drivetrain lag) where the judged launch has ~2.4, and the window, sliding each plan, took in the
+    next car. Once set off on a gap the window is now counted from then (`Constraints::cross_go_t`, at least 0.5 s).
+  - commit_r10 27.5 %, a collision: went ahead of a car 2.9 s off; mid-lane at 5 m/s the gap read shut, a later hold
+    was clear, and it braked to rest in the oncoming lane and was hit. Set off and unable to stop short, it now goes
+    on whatever later hold there is.
+  - commit2_r10 41.0 %: went at 20.2 s; mid-junction a cross-road car from the right (3715), off its stop sign at
+    2-3 m/s, came into the lane the ego turns into just ahead; the cross plan stays behind mergers
+    (wait_for_mergers/stay_behind) and braked at -4.6 to rest, nose near the oncoming lane, then waited 47 s.
+  - Not yet: the turn was held near 5 m/s. Offline scenarios and other routes not re-run with any of this.
+- **Route 10, launching as PDM-Lite (14 Nov, one run each).** PDM-Lite goes from brake 1.0 to throttle 1.0 in one
+  tick: 0.05 m/s 0.2 s later, 5.0 m/s 1.15 s after the throttle. Ours ramped (0.81-0.95, then 0.71 when the next plan
+  started its jerk-limited ramp again from the measured acceleration): 1.3 s. The agent now gives full throttle
+  once a plan from below 0.5 m/s gains 2 m/s in 1 s, until the plan 0.5 s on is within 1 m/s of the speed
+  (simlingo_nmpc_agent.py `LAUNCH_*`). The launches now match PDM-Lite's (0.13 m/s at 0.2 s, 4.8 m/s at 1.05 s).
+  - launch_r10 27.5 %, a collision: each start was dropped 0.6 s in. `wait_for_mergers` in the cross candidate
+    gated the ego 10.65 m on until 7.1 s for a cross-road car at its stop sign (3720, due in the lane at 7-8 s); at
+    1.4 m/s off full throttle the plan could not stop short (slack 0.86) and braked. The cross candidate now
+    ignores a merger its judged drive is through ahead of (rear 6 m + 1 s x its speed past the merger's entry by
+    then; crossing.cpp, `wait_for_mergers(..., clear_of)`).
+  - launch2_r10 60.0 %, route 100 % for the first time, one collision: across at 13.55 s; at 16.1 s an oncoming
+    car on the new road, its path clipping the ego's lane at the corner 2 s on (behind the ego by then), was a
+    "cut-in" lead coming the wrong way; the plan braked to -1 m/s and 3727 (gone ahead of) hit the slowing ego.
+    classify.cpp: an opposed car coming into the lane no further on than the ego's front now is circles, not a
+    lead (replayed: 6.0 -> 8.3 m/s where it braked).
+  - launch3_r10 54.5 %, route 100 %, 3727 again at 16.55 s (no braking now), and 6.6 m outside route lanes. The
+    ego was still in the oncoming lane 3 s after its start (PDM-Lite is out of the junction 3.1 s after its own).
+    The turn is the slow part: the judged drive caps it at 6.0-6.9 m/s (mu g = 8.8 on a ~5.5 m radius) and the
+    plan drives 5.1-5.9 under it; PDM-Lite takes it at 9-10 m/s. The gap was judged clear on the 2 s window
+    (PDM-Lite's), so a slower crossing than PDM's meets a car the window ignored. mu 0.9 is our assumption, not
+    measured in CARLA; PDM-Lite's 10-18 m/s^2 without a slide says CARLA's grip is higher.
+- **The MKZ's grip in CARLA, and route 10 with it (14 Nov).** scripts/identify_grip.py: on Town06's straight, speed
+  held, steer stepped and held 1 s (held 2 s the car struck the barriers above 6 m/s; the run steers to the side with
+  more lanes and drops any run with a collision), lateral acceleration over the last 0.4 s. It levels off at 18.1
+  m/s^2 at 10 m/s (steer 0.8), 19.8 at 12, 20.6 at 14 (sideslip 2-13 deg); a_lat and speed x yaw rate agree. Wheels:
+  tire_friction 3.5, lat_stiff_value 20. So mu ~2.0; `mu` is now 1.6 (0.8 of it; was 0.9, assumed). It sets only the
+  friction circle and junction bend speeds (braking stays 4.6, bends off junctions a_lat_ref 3).
+  - grip_r10, grip2_r10 50.8 %, no collision, both "deviated from the route" at the same spot: into the left turn
+    at 7.6 m/s, 3-5 m into the junction and still straight, `lane_path` took the car's own map waypoint, which
+    among the overlapping junction lanes from one entry was the right turn's: the path turned right, then straight.
+    At 5 m/s SimLingo's line had left the lane by then and the map's turn lane (turn_path) was used. Now
+    `Route._lane_at` (map.py): inside a junction, the route's junction lane from the same entry, if within 3 m.
+  - Tried and removed: a faster steering rate in junctions (1.2 rad/s, PDM-Lite's into the turn); the plan replayed
+    with it was unchanged, the steering rate did not hold it. Also added, not shown to matter: `turn_path` keeping the junction lane it took while the car is in that junction (`in_turn`;
+    not exercised in routelane_r10, on_turn stayed False).
+  - routelane_r10 60.0 %, route 100 %: turns left now, struck by 3723 (crossed ahead of) 3.15 s after the start at
+    6.8-7.0 m/s in the turn. The cap is the speed limit: `scene.v_max` = hero.get_speed_limit() = 30 km/h (8.33)
+    here, briefly 50; PDM-Lite reads its own table along the route (team_code/speed_limits/<map>_speed_limits.npy,
+    50 km/h here) and aims for 0.72 of it, 10 m/s, through the turn. The plan also dips ~1 m/s under 8.33 in the
+    turn (gates; without them it dips to 4.7-5.2).
+- **Route 10 with PDM-Lite's speed limits (15 Nov, one run).** `scene.v_max` now comes from PDM-Lite's table of
+  the map's limits (team_code/speed_limits/<map>_speed_limits.npy, nearest point within 10 m, else CARLA's sign):
+  50 km/h through route 10's junction where CARLA said 30 (the table has only 50/80/100/120). vlimit_r10 60.0 %,
+  route 100 %: away at 9.45 s, 9.7 m/s at 11.4 s, then braked to 7.2 at 12.0 s mid-turn and was struck by 3721 (the
+  car it was going ahead of). It came up to the corner (kappa 0.19, radius ~5.1 m) at 10.3 m/s where mu 1.6 allows
+  ~8.9; every replay of 11.3 s holds a_lat at 15.6 (the friction circle); cold, the plan slows only to 9.0 and runs
+  on ahead of 3721 (mover slack 0.19), warm in the car it slowed to 6.2. w_lat 0.05 -> 0.003 changes nothing: grip
+  binds, not the cost. PDM-Lite takes this corner at 10 m/s, up to 18 m/s^2, near the 18-20 measured.
+- **Route 10's left turn as PDM-Lite drives it: 100 % (15 Nov, pdmturn3_r10, one run).** The cross candidate now:
+  - drives and judges PDM-Lite's profile: full throttle up to the limit (since the regression check: v_max is PDM-Lite's
+    target where CARLA's sign is lower; at most 64 km/h turning), held through the junction, never above the bend's
+    speed (`cross_speed_max`; crossing.cpp `v_top`);
+  - bends in junctions and the friction circle of a plan reaching one at `junction_mu` 1.8 (0.9 of the 18.1 m/s^2
+    measured at 10 m/s; `mu` 1.6 elsewhere);
+  - is solved from that drive, not the last plan (`Problem::seed_v_ref`);
+  - may cut the inside of a junction bend by `junction_cut` 0.5 m (lane.cpp), as PDM-Lite's look-ahead steering
+    turns in before the arc. Held to the lane, the plan turned in late and slowed to 6.8 m/s at kappa 0.2 (the
+    curvature rises 0 -> 0.2 in 4 m: ~1.1 rad/s of steering at 9 m/s against 0.6); with 0.5 m it holds 8.5, ~10 m/s^2,
+    and the steering rate no longer binds. pdmturn_r10 (no cut): 7.2-7.9 in the turn, struck by 3723.
+  - pdmturn2_r10 (cut, 8.2-8.45 in the turn) lost 0.65 s to a start braked away at 0.47 m/s: the judged drive gave
+    the 0.2 s launch delay below 0.5 m/s though the car was rolling, and where the drive stands the plan had no give,
+    so a gate held it at its front. The delay is now from a standstill only (v < 0.1, a < 0.5), and moving the plan
+    has GIVE. pdmturn3_r10: away at 10.55 s, 7.7-8.1 m/s through the corner, out by ~14.2 s, 100 %.
+- **Regression check after the route 10 work (15 Nov).** Offline (build/urban_scenarios) against the last commit
+  (f113d23, built in a worktree), then routes 0, 1, 4, 6, 8, 10 once each on the final code:
+  - `cross` held to 0.72 of the limit everywhere slowed a car at 10 m/s crossing straight ahead of another into it
+    (crossing_yield: contact at 4.1 s). The cap is now for turns in a junction only.
+  - `mu` 1.6 off junctions let the offline overtakes and a merge swerve at up to 14.7 m/s^2 and leave the road
+    (parked_car_overtake@local, asked_overtake_*@local, merge_into_stream). `mu` is 0.9 again; junction_mu 1.8 in
+    junctions carries route 10.
+  - Route 4 (construction, one lane each way, CARLA's sign 30 km/h, PDM-Lite's table 50) failed with the table's limit
+    in full: an unseen oncoming car was assumed at 50 km/h (more sight than there was; waited for good), and with that
+    fixed (`Scene::v_traffic`, CARLA's limit, for unseen cars) the overtake, planned to 70 km/h, was called off half out
+    (an oncoming car within its longer check), lost the lane it kept to, followed SimLingo's line down the oncoming lane,
+    no longer saw the works as in its way and stopped beside them. `v_max` is now max(CARLA's sign, 0.72 x the table):
+    PDM-Lite's 10 m/s where the sign is lower, as before elsewhere.
+  - Final code: routes 0, 1, 4, 6, 8, 10 all 100 % (one run each; route 10 also 100 % in pdmturn3_r10). Offline: the
+    same scenarios fail as at the last commit (21 of 52 there, mostly solve time, pedestrian_behind_van, parked_car_wait,
+    the tight_turn info checks), plus the three new tight_turn_j info checks, plus two solve-time regressions measured
+    with the CPU idle: merge_into_stream@local p95 46 -> 60 ms, merge_from_rest_1 38 -> 106 ms (and 223 -> 198 m
+    travelled). The cross solve seeded from the judged drive (`seed_v_ref`) is most of the second (52.6 ms without it);
+    junction_cut and junction_mu are neither; the first is not found yet (two sessions of uncommitted changes apart).
+- **Seven untried types, one route each (15 Nov, final code).** 100 %: route 2 HazardAtSideLane, 79 HardBreakRoute, 14
+  OppositeVehicleTakingPriority, 122 DynamicObjectCrossing, 25 VanillaSignalizedTurnEncounterRedLight. Route 103
+  (SignalizedJunctionLeftTurn) 26.9 %: away at green at 12.2 s, 10 m/s and still straight 17 m on, a new crosser
+  prediction at 14.55 s (pass:3880) braked it at -4 m/s^2 in the crossing and 3871 struck it at 14.95 s; then stood.
+  Route 66 (YieldToEmergencyVehicle) 70 %: completed, yield_emergency_vehicle_infractions (no rule for it yet).
+
 - **How PDM-Lite does route 8** (~/b2d_results/pdm_lite/08_SignalizedJunctionRightTurn: steps.csv each tick,
   video; 100 %, 11.3 s, no infractions). The scenario (signalized_junction_right_turn.py) turns the ego's light
   green 5 s after it passes the trigger (x 2502.3), and starts the flow then: cars come in after +1.75 s, then a

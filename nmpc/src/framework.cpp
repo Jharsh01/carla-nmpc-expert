@@ -338,6 +338,23 @@ Plan UrbanNMPC::solve(const Problem& pr) {
             std::copy(guess.data(), guess.data() + NX, m.w0.begin() + m.x_at(k));
         }
     }
+    if (pr.seed_v_ref && !pr.v_ref.empty()) {  // from the speed asked for (Problem::seed_v_ref)
+        double s = s0, v = z0[IV];
+        for (int k = 0; k <= N; ++k) {
+            const int at = m.x_at(k);
+            if (k > 0) {
+                const double v_next = std::max(0.0, std::min(pr.v_max, sample(pr.v_ref_t, pr.v_ref, times[k])));
+                s += 0.5 * (v + v_next) * steps[k - 1];
+                v = v_next;
+                m.w0[at + IS] = s, m.w0[at + IE] = 0.0, m.w0[at + IPSI] = 0.0, m.w0[at + IV] = v;
+                m.w0[at + IA] = 0.0;
+                m.w0[at + IDELTA] = std::clamp(std::atan(p.L() * route.curvature(s)), -p.delta_max, p.delta_max);
+            }
+            if (k == N) break;
+            for (int i = 0; i < NU + NS; ++i) m.w0[m.u_at(k) + i] = 0.0;
+        }
+        std::copy(z0.data(), z0.data() + NX, m.w0.begin() + m.x_at(0));
+    }
     std::vector<double> s_plan(N + 1), e_plan(N + 1);
     for (int k = 0; k <= N; ++k) s_plan[k] = m.w0[m.x_at(k) + IS], e_plan[k] = m.w0[m.x_at(k) + IE];
 
@@ -368,7 +385,10 @@ Plan UrbanNMPC::solve(const Problem& pr) {
     for (int k = 0; k < N; ++k) {  // what is asked for, tapered to the bends, stops and leads ahead of the shifted plan
         double v = std::min(pr.v_max, pr.v_ref.empty() ? pr.v_max : sample(pr.v_ref_t, pr.v_ref, times[k + 1]));
         const double front = s_plan[k + 1] + front_arm;
-        v = bend_speed(v, par[NX + k], std::isfinite(pr.a_lat_ref) ? pr.a_lat_ref : opt.a_lat_ref);  // turn.cpp
+        // in a junction only grip limits the bend (turn.cpp): the friction circle is a constraint (grip.cpp)
+        const double a_lat = in_junction(c, s_plan[k + 1]) ? opt.junction_mu * p.g
+                             : std::isfinite(pr.a_lat_ref) ? pr.a_lat_ref : opt.a_lat_ref;
+        v = bend_speed(v, par[NX + k], a_lat);
         v = stop_speed(v, cap_taper[k], front, opt);  // stop.cpp
         v = behind_lead_speed(v, lead[k], lead_speed[k], front, follow_opt);  // follow.cpp
         par.push_back(v);
@@ -376,7 +396,10 @@ Plan UrbanNMPC::solve(const Problem& pr) {
     for (const auto* ys : {&c.ref, &c.lo, &c.hi})
         for (int k = 0; k < N; ++k) par.push_back(sample(c.s, *ys, s_plan[k + 1]));
     par.push_back(pr.v_max);
-    par.push_back(opt.mu * p.g);
+    // the friction circle: junction_mu where the plan reaches a junction (one value over the horizon)
+    bool reaches_junction = false;
+    for (int k = 0; k <= N; ++k) reaches_junction = reaches_junction || in_junction(c, s_plan[k]);
+    par.push_back((reaches_junction ? opt.junction_mu : opt.mu) * p.g);
     NmpcOptions weights = opt;  // the problem's own, where it sets them
     if (std::isfinite(pr.w_accel)) weights.w_accel = pr.w_accel;
     if (std::isfinite(pr.w_lat)) weights.w_lat = pr.w_lat;

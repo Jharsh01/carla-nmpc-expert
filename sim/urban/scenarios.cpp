@@ -546,12 +546,20 @@ std::vector<Scenario> scenarios(const Body& body) {
     }
     // Route 8's junction lane alone: from rest 10 m before a right turn of 12.5 m radius, no traffic, the lane
     // 2.8 m wide (as the map gives it through the junction), 3.5 m, 5 m. How fast does the plan take the bend?
+    // tight_turn_j_*: the bend marked as a junction, where only grip limits it (turn.hpp; PDM-Lite: up to 18 m/s^2)
+    for (const bool junction : {false, true})
     for (double w : {2.8, 3.5, 5.0}) {
         const double r = 12.5, arc = 0.5 * M_PI * r;
         char name[40];
-        std::snprintf(name, sizeof name, "tight_turn_%.1f", w);
+        std::snprintf(name, sizeof name, junction ? "tight_turn_j_%.1f" : "tight_turn_%.1f", w);
         Scenario sc{name, Path::from_pieces({0.0, 0.0, 0.0}, {10.0, arc, 150.0}, {0.0, -1.0 / r, 0.0}, false), 0.0, 13.9, 8.0};
-        sc.lanes = {LaneSection{0.0, INF, -0.5 * w, 0.5 * w, 0.0, false, false, -0.5 * w, 0.5 * w}};
+        LaneSection lane{0.0, INF, -0.5 * w, 0.5 * w, 0.0, false, false, -0.5 * w, 0.5 * w};
+        if (!junction) sc.lanes = {lane};
+        else {
+            LaneSection in = lane, after = lane;
+            lane.s_to = in.s_from = 10.0, in.s_to = after.s_from = 10.0 + arc, in.junction = true;
+            sc.lanes = {lane, in, after};
+        }
         sc.road_lo = -0.5 * w, sc.road_hi = 0.5 * w;
         sc.goal = [arc](const std::vector<std::array<double, 8>>& tr) -> std::string {
             double v_bend = 0.0, t_out = -1.0, e_max = 0.0;

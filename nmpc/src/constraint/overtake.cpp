@@ -146,7 +146,7 @@ void overtake(const Constraints& cs, const Percept& p, const Scene& sc, bool lef
     if (oncoming_lane && std::isfinite(sight)) {
         const double half = 2.4;  // half a car's length [m]
         for (double t = 0.0; t <= T + 1e-9 && !unseen_traffic; t += 0.1) {
-            const double s = s0 + sight + half - sc.v_max * t;
+            const double s = s0 + sight + half - (std::isfinite(sc.v_traffic) ? sc.v_traffic : sc.v_max) * t;
             unseen_traffic = s + half > rear0 && s - half < ours(t) + opt.oncoming_gap;
         }
     }

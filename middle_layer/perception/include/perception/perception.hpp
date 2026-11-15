@@ -62,6 +62,8 @@ struct LaneSection {
     // takes that lane in too, but room there is no way past a parked car: it is the oncoming traffic's, and going
     // round through it is a borrow, judged on that traffic. Empty (way_lo > way_hi) if the band is all oncoming.
     double way_lo = -INF, way_hi = INF;  // [m]
+    // in a junction (the map's): bends there are taken at what grip allows (nmpc/constraint/turn.hpp)
+    bool junction = false;
 };
 
 struct StopLine {
@@ -86,6 +88,11 @@ struct Scene {
     double t = 0.0;  // [s]
     Ego ego;
     double v_max = 50.0 / 3.6;  // speed limit [m/s]
+    // the speed the other traffic keeps to, for cars not seen (overtake.cpp); NaN: v_max. The agent's v_max is
+    // PDM-Lite's table of limits, its v_traffic CARLA's sign limit, which the background traffic drives at (route 4:
+    // 30 km/h where the table says 50; an unseen oncoming car at 50 needed more sight than there was, and the car
+    // waited behind the works for good)
+    double v_traffic = NAN;  // [m/s]
     std::vector<double> v_ref_t, v_ref;  // speed asked for over time (e.g. SimLingo's); empty: the limit
     std::vector<double> line_s, line_e;  // the line asked for along the route (e.g. SimLingo's path); empty: lane centre
     std::vector<LaneSection> lanes;  // empty: one 3.5 m lane centred on the route

@@ -62,6 +62,22 @@ NMPC_LATENCY = 1  # ticks from a plan's scene to its use: the NMPC has 50 ms, as
 SIMLINGO_EVERY = 10  # ticks between SimLingo's predictions (2 Hz)
 REVERSE_SPEED = 1.5  # [m/s] backing up to see past a blocker
 REVERSE_THROTTLE = 0.4
+# Launching from rest as PDM-Lite does (route 10: throttle 1.0 off the brake, 0.05 to 5.0 m/s in 0.95 s): full
+# throttle once a plan from (near) rest gains LAUNCH_GAIN in 1 s, until the plan 0.5 s on is within LAUNCH_END of the
+# speed. The plan's jerk limit ramped each start from the measured acceleration (0.8-0.95 then 0.7 throttle, 0.15 s
+# slower to 5 m/s), where crossing.cpp judges gaps on a full-throttle launch.
+LAUNCH_FROM, LAUNCH_GAIN, LAUNCH_END = 0.5, 2.0, 1.0  # [m/s]
+# The speed limit as PDM-Lite reads it: its table of the map's limits (SimLingo's team_code/speed_limits/<map>_speed_
+# limits.npy: CARLA x, y, z and km/h), the nearest point within SPEED_TABLE_NEAR. CARLA's get_speed_limit (the last
+# sign passed) said 30 km/h through route 10's junction where the table says 50, and the left turn across the stream
+# was held to 8.33 m/s where PDM-Lite takes it at 10 (0.72 of 50 km/h); the car crossed ahead of was on it 3.15 s
+# after the start (routelane_r10).
+SPEED_TABLE_NEAR = 10.0  # [m]
+# The speed asked for at most: CARLA's sign limit, or PDM-Lite's target where that is higher (PDM_TARGET_RATIO of its
+# table's limit: its ratio_target_speed_limit). The table's 50 km/h in full, where CARLA's sign says 30, sent route 4's
+# overtake past the works at up to 70 km/h, its check on the oncoming lane reaching that much further, and the car
+# called it off half out and stopped beside the works (reg4_r4).
+PDM_TARGET_RATIO = 0.72
 LOOK_RANGE = 150.0  # [m] the world model reports vehicles this far off (and in line of sight)
 SIMLINGO_LATENCY = 6  # ticks from SimLingo's camera frame to its prediction's use: on its own core of an L4
                       # machine it takes 290 ms (60 preprocessing, 230 the model), so 300 ms would hold in real time
@@ -73,6 +89,18 @@ WORKER_START_TIMEOUT = 600.0  # [s] for the worker to load SimLingo's model
 def get_entry_point():
     return "SimLingoNMPCAgent"
 
+
+
+def _speed_limit_table(map_name):
+    """(KD-tree of the points, their limits [km/h]) from PDM-Lite's table for the map, or None where there is none."""
+    path = os.path.join(os.path.dirname(os.path.abspath(agent_simlingo.__file__)), "speed_limits",
+                        f"{map_name}_speed_limits.npy")
+    if not os.path.exists(path):
+        print(f"no speed limit table {path}: CARLA's limits", flush=True)
+        return None
+    from scipy.spatial import cKDTree
+    data = np.load(path, allow_pickle=True).item()
+    return cKDTree(np.asarray(data["locations"], dtype=float)), np.asarray(data["speed_limits"], dtype=float)
 
 class _NoModel:
     """Stands in for SimLingo's model in this process, where LingoAgent.setup would load it (it runs in the worker):
@@ -286,6 +314,7 @@ class SimLingoNMPCAgent(LingoAgent):
         # vehicles reported to LOOK_RANGE: an overtake at 50 km/h needs 100-140 m of oncoming lane seen clear
         self.actors = Actors(expertctl, carla, world, carla_map, self.hero, look_range=LOOK_RANGE)
         self.sight = Sight(carla, world, carla_map, self.hero)
+        self.speed_limits = _speed_limit_table(carla_map.name.split("/")[-1])
         self.params = expertctl.VehicleParams.from_file(os.path.join(REPO, "config", "vehicles", "mkz2020.json"))
         self.body = expertctl.Body(length=4.89, width=1.84 + 0.2, cg_to_center=0.31)  # mirrors on the width
         self.nmpc_options = expertctl.UrbanOptions()
@@ -304,6 +333,7 @@ class SimLingoNMPCAgent(LingoAgent):
         self.hold = PlanHold()
         self.t_plan = 0.0
         self.steer = self.a_filtered = self.delta_command = 0.0
+        self.launching = False
         self.logged_step = None  # the last prediction written to the log
         self.intent = expertctl.PathIntent()
         save = os.environ.get("SAVE_PATH")
@@ -325,6 +355,17 @@ class SimLingoNMPCAgent(LingoAgent):
                 print(f"NMPC live view not started: {e}", flush=True)
         self.started = True
 
+    def _speed_limit(self):
+        """The limit where the car is [km/h]: PDM-Lite's table for the map (_speed_limit_table) at the nearest point
+        within SPEED_TABLE_NEAR, else CARLA's (the last sign the car passed)."""
+        if self.speed_limits is not None:
+            tree, limits = self.speed_limits
+            loc = self.hero.get_location()
+            d, i = tree.query((loc.x, loc.y, loc.z))
+            if d < SPEED_TABLE_NEAR:
+                return float(limits[i])
+        return self.hero.get_speed_limit()
+
     def _path(self, route, frame, ego):
         """The path for this plan and where SimLingo's part of it ends: the lane the car is in, unless SimLingo's path
         leaves it. `route`: SimLingo's path in the car's frame now (y right)."""
@@ -336,7 +377,9 @@ class SimLingoNMPCAgent(LingoAgent):
             self.intent.update([p[0] - s_now for p in points], [p[1] for p in points])
             # the lane's path too while the planner is peeking past a blocker and going round from there: its
             # lanes, its room behind and the line it edges out to are the lane's, not those of a line that leaves it
-            if not self.intent.manoeuvre or (self.decision is not None and self.decision.keep_lane):
+            # (not inside a junction on a turn already taken: there the car's lane is the one straight on)
+            if (not self.intent.manoeuvre or (self.decision is not None and self.decision.keep_lane)) and \
+                    not self.route.in_turn(frame):
                 return lane, points[-1][0]
         points = simlingo_ref.path_points(route)
         # a turn at a junction: the junction lane SimLingo's line follows, as the map has it (the same from plan to
@@ -416,7 +459,9 @@ class SimLingoNMPCAgent(LingoAgent):
             scene = expertctl.Scene()
             scene.t = t
             scene.ego = ego
-            scene.v_max = max(1.0, self.hero.get_speed_limit() / 3.6)  # a stand-in for reading the signs
+            sign = self.hero.get_speed_limit() / 3.6  # a stand-in for reading the signs
+            scene.v_max = max(1.0, sign, PDM_TARGET_RATIO * self._speed_limit() / 3.6)
+            scene.v_traffic = max(1.0, sign)  # what the background traffic keeps to
             scene.v_ref_t, scene.v_ref = simlingo_ref.speed_reference(self.held[0], age=(self.step - self.held_step) * DT)
             stop = simlingo_ref.asks_to_stop(scene.v_ref_t, scene.v_ref)
             if not self.intent.manoeuvre and not stop:  # the limit, for the actors and the rules to bring down
@@ -457,9 +502,22 @@ class SimLingoNMPCAgent(LingoAgent):
         since = t - self.t_plan
         a_ref = self._plan_at(since + 0.25, 4)  # the acceleration a lag ahead: the drivetrain takes that long
         delta_ref = self._plan_at(since + 0.15, 5)  # the steering's lag (scripts/identify_ego.py)
+        at_rest = self._plan_at(since, 3) < 0.2 and self._plan_at(since + 1.0, 3) < 0.2
+        if at_rest and speed < 0.3:
+            # planned at rest: the wheels stay where they are. Each plan at rest steers for the turn it will make
+            # later, and turned in place plan after plan the wheels reached full lock (0.94 of 0.95 rad, route 10
+            # waiting to turn left, pdmgap2_r10); a plan from there backs off while it unwinds them, the first steps
+            # brake, and no gap judged clear was ever taken
+            delta_ref = self.delta_command
         delta_ref = self.delta_command = rate_limited(delta_ref, self.delta_command, self.params.delta_rate_max, DT)
-        if self._plan_at(since, 3) < 0.2 and self._plan_at(since + 1.0, 3) < 0.2:
+        if at_rest:
             a_ref = min(a_ref, -1.0)  # planned at rest: hold the brake
+        if at_rest or self._plan_at(since + 0.5, 3) < speed + LAUNCH_END:
+            self.launching = False
+        elif speed < LAUNCH_FROM and self._plan_at(since + 1.0, 3) > speed + LAUNCH_GAIN:
+            self.launching = True
+        if self.launching:
+            a_ref = max(a_ref, 2.0 * self.params.a_drive(speed))  # beyond the throttle map: 1.0
         a_ref = min(a_ref, self.hold.a_limit(t))
         throttle, brake, steer = self.actuation.command(a_ref, delta_ref, speed, self.a_filtered)
         backing = self._reverse()

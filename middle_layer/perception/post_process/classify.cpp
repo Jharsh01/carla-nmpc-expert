@@ -141,7 +141,13 @@ void classify(Percept& p, const Body& body, const PerceptionOptions& opt, const 
             for (size_t i : inside) c.s_lo = std::min(c.s_lo, tr.s[i] - tr.ext_s[i]), c.s_hi = std::max(c.s_hi, tr.s[i] + tr.ext_s[i]);
             p.crossers.push_back(c);
             p.notes.push_back(fmt("crosser in the lane from %.1f s to %.1f s at s %.1f m", c.t_in, c.t_out, c.s_lo));
-        } else if (!crossing_kind && !inside.empty() && !behind_now && (ahead_now || !in_now)) {
+        } else if (!crossing_kind && !inside.empty() && !behind_now && (ahead_now || !in_now) &&
+                   // not one coming the other way into the lane no further on than the ego's front is now: by then
+                   // the ego has moved on, and as a lead it is behind it (launch2_r10, 16.1 s: across the oncoming
+                   // lane in the turn, an oncoming car on the new road clipping the lane at the corner at 2 s was a
+                   // lead from then, the plan braked to -1 m/s, and the car it crossed ahead of hit it). Kept clear
+                   // of in space and time, as circles.
+                   !(opposed && !in_now && tr.s[inside.front()] - tr.ext_s[inside.front()] < front0)) {
             // a lead (or, opposed, one coming the wrong way down the lane); one cutting in counts from when it does.
             // Not one behind the car: reaching where the car is now is not cutting in, the car will have moved on.
             // One that overtakes and cuts in counts once it is level.

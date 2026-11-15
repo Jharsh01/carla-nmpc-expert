@@ -67,7 +67,7 @@ public:
     // The candidates for the scene `p` was perceived from, `last_label` the one chosen last time. Keeps the traffic
     // rules' state (stop signs held at, lights decided on).
     Result build(const Percept& p, const Scene& scene, const std::string& last_label);
-    void reset() { stops.reset(); view_stop = 0; peek = 0; }  // forget the rules' state (a new route)
+    void reset() { stops.reset(); view_stop = 0; peek = 0; cross_go_t = -1.0; }  // forget the rules' state (a new route)
 
     const Body body;
     const VehicleParams params;  // its a_drive_max: how fast the car can gain speed
@@ -82,6 +82,10 @@ public:
     // 3 going round from there.
     int peek = 0;
     double peek_back_gap = 0.0, peek_gap = 0.0;  // [m]
+    // When the ego set off across a gap (crossing.cpp: cross), -1 if it is not going: while it goes on that gap,
+    // its window (cross_forecast) stays counted from then, not from each plan (route 10, steerhold_r10: the car
+    // gained 0.5 m/s in 0.4 s where the judged launch has 2.4, the window slid onto the next car, and it braked)
+    mutable double cross_go_t = -1.0;  // [s]
 };
 
 }  // namespace ex

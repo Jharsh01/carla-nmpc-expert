@@ -78,7 +78,8 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("s", &ex::Corridor::s)
         .def_readwrite("lo", &ex::Corridor::lo)
         .def_readwrite("hi", &ex::Corridor::hi)
-        .def_readwrite("ref", &ex::Corridor::ref);
+        .def_readwrite("ref", &ex::Corridor::ref)
+        .def_readwrite("junction", &ex::Corridor::junction);
 
     py::class_<ex::Mover>(m, "Mover")
         .def(py::init([](std::vector<double> t, std::vector<double> s, std::vector<double> e_y, double radius, double growth) {
@@ -134,6 +135,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("a_lat_ref", &ex::Problem::a_lat_ref)
         .def_readwrite("w_accel", &ex::Problem::w_accel)
         .def_readwrite("w_lat", &ex::Problem::w_lat)
+        .def_readwrite("seed_v_ref", &ex::Problem::seed_v_ref)
         .def_readwrite("chasers", &ex::Problem::chasers);
 
     py::class_<ex::Plan>(m, "Plan", "x: [s, e_y, e_psi, v, a, delta] per step, u: [jerk, delta_rate] per step")
@@ -153,7 +155,7 @@ PYBIND11_MODULE(expertctl, m) {
     opt.def(py::init<>());
 #define FIELD(name) opt.def_readwrite(#name, &Opt::name)
     FIELD(horizon); FIELD(h); FIELD(h_fine); FIELD(fine); FIELD(n_movers); FIELD(margin); FIELD(edge_margin); FIELD(gap_min); FIELD(gap); FIELD(time_gap); FIELD(a_stop); FIELD(a_ref); FIELD(a_lat_ref);
-    FIELD(a_max); FIELD(a_min); FIELD(jerk_max); FIELD(mu); FIELD(w_speed); FIELD(w_lane); FIELD(w_heading);
+    FIELD(a_max); FIELD(a_min); FIELD(jerk_max); FIELD(mu); FIELD(junction_mu); FIELD(w_speed); FIELD(w_lane); FIELD(w_heading);
     FIELD(w_accel); FIELD(w_jerk); FIELD(w_rate); FIELD(w_lat); FIELD(w_headway); FIELD(w_slack); FIELD(tol); FIELD(acceptable_tol);
     FIELD(acceptable_iter); FIELD(max_iter); FIELD(jit); FIELD(cache_dir); FIELD(warm_start);
 #undef FIELD
@@ -196,16 +198,16 @@ PYBIND11_MODULE(expertctl, m) {
     py::class_<ex::LaneSection>(m, "LaneSection")
         .def(py::init([](double s_from, double s_to, double lo, double hi, double left_width, bool left_oncoming,
                          bool left_allowed, double road_lo, double road_hi, double right_width, bool right_oncoming,
-                         bool right_allowed, double way_lo, double way_hi) {
+                         bool right_allowed, double way_lo, double way_hi, bool junction) {
                  return ex::LaneSection{s_from,  s_to,        lo,          hi,             left_width,    left_oncoming,
                                         left_allowed, road_lo, road_hi, right_width, right_oncoming, right_allowed,
-                                        way_lo, way_hi};
+                                        way_lo, way_hi, junction};
              }),
              py::arg("s_from") = 0.0, py::arg("s_to") = ex::INF, py::arg("lo") = -1.75, py::arg("hi") = 1.75,
              py::arg("left_width") = 0.0, py::arg("left_oncoming") = true, py::arg("left_allowed") = false,
              py::arg("road_lo") = -ex::INF, py::arg("road_hi") = ex::INF, py::arg("right_width") = 0.0,
              py::arg("right_oncoming") = false, py::arg("right_allowed") = false, py::arg("way_lo") = -ex::INF,
-             py::arg("way_hi") = ex::INF)
+             py::arg("way_hi") = ex::INF, py::arg("junction") = false)
         .def_readwrite("s_from", &ex::LaneSection::s_from)
         .def_readwrite("s_to", &ex::LaneSection::s_to)
         .def_readwrite("lo", &ex::LaneSection::lo)
@@ -219,7 +221,8 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("right_oncoming", &ex::LaneSection::right_oncoming)
         .def_readwrite("right_allowed", &ex::LaneSection::right_allowed)
         .def_readwrite("way_lo", &ex::LaneSection::way_lo)
-        .def_readwrite("way_hi", &ex::LaneSection::way_hi);
+        .def_readwrite("way_hi", &ex::LaneSection::way_hi)
+        .def_readwrite("junction", &ex::LaneSection::junction);
 
     py::class_<ex::StopLine> stop(m, "StopLine");
     py::enum_<ex::StopLine::Kind>(stop, "Kind")
@@ -248,6 +251,7 @@ PYBIND11_MODULE(expertctl, m) {
         .def_readwrite("t", &ex::Scene::t)
         .def_readwrite("ego", &ex::Scene::ego)
         .def_readwrite("v_max", &ex::Scene::v_max)
+        .def_readwrite("v_traffic", &ex::Scene::v_traffic)
         .def_readwrite("v_ref_t", &ex::Scene::v_ref_t)
         .def_readwrite("v_ref", &ex::Scene::v_ref)
         .def_readwrite("line_s", &ex::Scene::line_s)
@@ -283,7 +287,7 @@ PYBIND11_MODULE(expertctl, m) {
     BFIELD(pool); BFIELD(look_ahead); BFIELD(gate_margin); BFIELD(gate_buffer); BFIELD(blocker_range); BFIELD(blocker_overlap); BFIELD(static_margin);
     BFIELD(oncoming_gap); BFIELD(lane_gap); BFIELD(merge_time); BFIELD(pass_progress); BFIELD(stop_hold); BFIELD(dilemma_decel); BFIELD(hysteresis); BFIELD(w_out_of_lane);
     BFIELD(pass_penalty); BFIELD(slack_ok);
-    BFIELD(overtake_over_limit); BFIELD(peek_back); BFIELD(peek_run); BFIELD(peek_over); BFIELD(peek_min_gap); BFIELD(peek_rear_gap); BFIELD(peek_speed); BFIELD(merge_gap); BFIELD(merge_lead_gap); BFIELD(merge_lag); BFIELD(merge_run_up); BFIELD(merge_a_lat); BFIELD(merge_chaser_brake); BFIELD(ignore_mergers); BFIELD(cross_buffer); BFIELD(cross_slow_speed); BFIELD(cross_slow_horizon); BFIELD(cross_side); BFIELD(junction_slack);
+    BFIELD(overtake_over_limit); BFIELD(peek_back); BFIELD(peek_run); BFIELD(peek_over); BFIELD(peek_min_gap); BFIELD(peek_rear_gap); BFIELD(peek_speed); BFIELD(merge_gap); BFIELD(merge_lead_gap); BFIELD(merge_lag); BFIELD(merge_run_up); BFIELD(merge_a_lat); BFIELD(merge_chaser_brake); BFIELD(ignore_mergers); BFIELD(cross_buffer); BFIELD(cross_forecast); BFIELD(cross_speed_max); BFIELD(cross_wait_margin); BFIELD(cross_slow_speed); BFIELD(cross_slow_horizon); BFIELD(cross_side); BFIELD(junction_slack); BFIELD(junction_cut);
 #undef BFIELD
 
     py::class_<ex::PathIntent>(m, "PathIntent")

@@ -80,6 +80,7 @@ class Route:
         self.route_end = route_end_xy
         self.route_xy = None if route_xy is None or len(route_xy) == 0 else np.asarray(route_xy, dtype=float).reshape(-1, 2)
         self._ego_lanes, self._body_lanes = [], set()  # from the last lanes()
+        self._turn = None  # (junction id, lane_key of its first waypoint): the junction lane the last turn_path took
         self.lights = []  # (light, x, y, psi) of each stop waypoint
         for light in world.get_actors().filter("traffic.traffic_light"):
             for wp in light.get_stop_waypoints():
@@ -101,13 +102,50 @@ class Route:
         return self.map.get_waypoint(self.carla.Location(*frames.to_carla_xy(x, y), z), project_to_road=True,
                                      lane_type=self.carla.LaneType.Driving)
 
+    def _lane_at(self, x, y, z, psi, near=3.0):
+        """The driving lane at (x, y) heading psi (world frame), as _waypoint; but inside a junction, where the lanes
+        from one entry overlap, the one the route takes, if (x, y) is within `near` of it. Into route 10's left turn at
+        7.6 m/s, 3-5 m in and still straight, the car's waypoint was the right turn's lane, the lane path turned right,
+        and the car left the route (grip_r10, keepturn_r10)."""
+        wp = self._waypoint(x, y, z)
+        if wp is None or not wp.is_junction or self.route_xy is None:
+            return wp
+        if math.cos(_angle(frames.from_carla_yaw(wp.transform.rotation.yaw) - psi)) < 0.0:
+            return wp  # an oncoming lane: lane_path's own concern
+        entry, d = wp, 0.0  # back to the lane it came in by
+        while entry.is_junction and d < 80.0:
+            prev = entry.previous(2.0)
+            if not prev:
+                return wp
+            entry, d = prev[0], d + 2.0
+        branches = entry.next(2.0)
+        for _ in range(4):  # on to where it forks
+            if len(branches) != 1 or branches[0].is_junction:
+                break
+            branches = branches[0].next(2.0)
+        b = self._route_branch(branches) if len(branches) > 1 else None
+        if b is None:
+            return wp
+        best, best_d, w = None, near, b
+        for _ in range(100):  # along it, the point nearest (x, y)
+            dd = math.hypot(*(np.array(_xy(w.transform.location)) - (x, y)))
+            if dd < best_d:
+                best, best_d = w, dd
+            if not w.is_junction:
+                break
+            nxt = [n for n in w.next(1.0) if n.road_id == w.road_id and n.lane_id == w.lane_id] or w.next(1.0)
+            if not nxt:
+                break
+            w = nxt[0]
+        return best if best is not None else wp
+
     def continuation(self, frame, x, y, psi):
         """Points past the car-frame point (x, y), heading psi: along the lane there, its offset from the lane centre
         fading over JOIN, for CONTINUE metres; straight on where the map gives out. In the car's frame."""
         x, y = frame.to_world(x, y)
         psi += frame.psi
         out = []
-        wp = self._waypoint(x, y, frame.z)
+        wp = self._lane_at(x, y, frame.z, psi)
         if wp is not None:
             lane_psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
             forward = math.cos(_angle(lane_psi - psi)) >= 0.0  # the lane runs the way the car goes (not oncoming)
@@ -172,7 +210,7 @@ class Route:
     def lane_path(self, frame):
         """The centre of the lane the car is in, from BEHIND metres behind it, along the lane past it. It does not go
         through the car: the car's offset from it stays the NMPC's to take out. None where the map has no lane."""
-        wp = self._waypoint(frame.x, frame.y, frame.z)
+        wp = self._lane_at(frame.x, frame.y, frame.z, frame.psi)
         if wp is None:
             return None
         psi = frames.from_carla_yaw(wp.transform.rotation.yaw)
@@ -191,6 +229,13 @@ class Route:
         c, s = math.cos(psi), math.sin(psi)
         behind = [frame.to_car(x - d * c, y - d * s) for d in np.arange(BEHIND, -0.1, -2.5)]
         return self.ex.Path.from_waypoints([list(p) for p in behind + ahead], False)
+
+    def in_turn(self, frame):
+        """Whether the car is inside the junction whose lane the last turn_path took (that turn is kept)."""
+        if self._turn is None:
+            return False
+        wp = self._waypoint(frame.x, frame.y, frame.z)
+        return wp is not None and wp.is_junction and wp.get_junction().id == self._turn[0]
 
     def turn_path(self, points, frame, tolerance=2.0, look=40.0):
         """The map's own line for a turn SimLingo's path takes: the lane the car is in up to the next junction, the
@@ -223,7 +268,15 @@ class Route:
         if len(pts) < 3:
             return None
         best, best_score = None, tolerance
+        # Inside the junction, the lane already taken is kept: only lanes within 1.5 m of the car are looked at, and
+        # into route 10's left turn at 7.6 m/s, still straight 3-5 m in, the left lane was beyond that; SimLingo's
+        # line was matched elsewhere, the path went straight on and the ego left the route (grip_r10, grip2_r10)
+        kept_turn = self._turn if inside and self._turn is not None and self._turn[0] == junction.id else None
+        if not inside:
+            self._turn = None
         for start, end in junction.get_waypoints(carla.LaneType.Driving):
+            if kept_turn is not None and lane_key(start) != kept_turn[1]:
+                continue
             line, w = [start], start
             for _ in range(80):
                 nxt = [n for n in w.next(1.0) if n.road_id == w.road_id and n.lane_id == w.lane_id]
@@ -231,7 +284,9 @@ class Route:
                     break
                 w = nxt[0]
                 line.append(w)
-            if inside:  # one of the lanes the car is on
+            if kept_turn is not None:
+                pass
+            elif inside:  # one of the lanes the car is on
                 if min(np.hypot(*(np.array(_xy(l.transform.location)) - here)) for l in line) > 1.5:
                     continue
             else:
@@ -249,11 +304,12 @@ class Route:
             world = [_xy(l.transform.location) for l in line + after]
             car = np.array([frame.to_car(*q) for q in world])
             score = float(np.mean([np.min(np.hypot(car[:, 0] - px, car[:, 1] - py)) for px, py in pts]))
-            if score < best_score:
+            if score < best_score or kept_turn is not None:
                 best, best_score = (line, after), score
         if best is None:
             return None
         line, after = best
+        self._turn = (junction.id, lane_key(line[0]))
         lead = [] if inside else before[:-1]
         back, w, d = [], (lead[0] if lead else line[0]), 0.0
         while d < BEHIND + 30.0:  # behind the car, along the lane it came by
@@ -301,7 +357,8 @@ class Route:
                 half = 0.5 * (wp.lane_width if wp is not None else 3.5)
                 rows.append({"lo": -half, "hi": half, "against": False, "cuts": [], "left": 0.0, "oncoming": True, "allowed": False,
                              "right": 0.0, "right_oncoming": False, "right_allowed": False,
-                             "road": (-math.inf, math.inf), "lane": None, "neighbours": ()})
+                             "road": (-math.inf, math.inf), "lane": None, "neighbours": (),
+                             "junction": wp is not None and wp.is_junction})
                 continue
             left, right = across.neighbour(wp, left=True), across.neighbour(wp, left=False)
             left_ok, right_ok = self._drivable(left), self._drivable(right)
@@ -312,7 +369,7 @@ class Route:
                          "allowed": bool(left_ok), "right": right.lane_width if right_ok else 0.0,
                          "right_oncoming": bool(right_ok and across.against(right)), "right_allowed": bool(right_ok),
                          "road": tuple(road), "lane": lane_key(wp),
-                         "neighbours": tuple(lane_key(n) for n in (left, right) if self._drivable(n))})
+                         "neighbours": tuple(lane_key(n) for n in (left, right) if self._drivable(n)), "junction": False})
         sections = []
         self._ego_lanes = []
         corners = [self._waypoint(*frame.to_world(a * BODY[0], b * BODY[1]), frame.z) for a in (-1, 1) for b in (-1, 1)]
@@ -344,15 +401,15 @@ class Route:
             way_lo, way_hi = (min(a for a, _ in way), max(b for _, b in way)) if way else (math.inf, -math.inf)
             key = (round(lo, 1), round(hi, 1), round(left_of["left"], 1), left_of["oncoming"], left_of["allowed"],
                    round(road_lo, 1), round(road_hi, 1), round(right_of["right"], 1), right_of["right_oncoming"],
-                   right_of["right_allowed"], round(way_lo, 1), round(way_hi, 1))
+                   right_of["right_allowed"], round(way_lo, 1), round(way_hi, 1), row["junction"])
             if sections and sections[-1][1] == key:
                 sections[-1][0][1] = (i + 1) * SPACING
             else:
                 sections.append(([i * SPACING, (i + 1) * SPACING], key))
         out = [self.ex.LaneSection(s_from=a, s_to=b, lo=lo, hi=hi, left_width=lw, left_oncoming=onc, left_allowed=ok,
                                    road_lo=rlo, road_hi=rhi, right_width=rw, right_oncoming=ronc, right_allowed=rok,
-                                   way_lo=wlo, way_hi=whi)
-               for (a, b), (lo, hi, lw, onc, ok, rlo, rhi, rw, ronc, rok, wlo, whi) in sections]
+                                   way_lo=wlo, way_hi=whi, junction=jn)
+               for (a, b), (lo, hi, lw, onc, ok, rlo, rhi, rw, ronc, rok, wlo, whi, jn) in sections]
         out[-1].s_to = float("inf")
         return out
 

@@ -107,7 +107,15 @@ struct NmpcOptions {
     // 7.7 m/s^2 on dry asphalt (docs/vehicle_parameters.md); the limit set for the car is 4.6 (10 Nov).
     double a_min = -4.6;
     double jerk_max = 15.0;  // [m/s^3]
-    double mu = 0.9;  // friction the plans may use
+    // friction the plans may use off junctions (in them, junction_mu). The MKZ holds 18-20.6 m/s^2 in CARLA
+    // (scripts/identify_grip.py, 14 Nov), but at 1.6 (0.8 of it) the offline overtakes and merges swerved at up to
+    // 14.7 m/s^2 and left the road (parked_car_overtake@local, asked_overtake_*@local, merge_into_stream; 15 Nov); 0.9,
+    // about a real car on a dry road, as before
+    double mu = 0.9;
+    // in a junction (bend speeds, and the friction circle of a plan that reaches one): 0.9 of what the MKZ holds at
+    // 10 m/s in CARLA (18.1 m/s^2), as PDM-Lite turns left across route 10's stream at 10 m/s, up to 18 m/s^2 (15 Nov:
+    // at mu 1.6 the corner, radius ~5.1 m, was 8.9 m/s and the car braked in it in front of the car it crossed ahead of)
+    double junction_mu = 1.8;
     double w_speed = 1.0;
     double w_lane = 3.0;
     double w_heading = 1.0;
@@ -142,7 +150,18 @@ struct ConstraintOptions : PerceptionOptions {
     // (x1.2-1.5 the other's length, x1.3 its own when moving), some 0.1-0.25 s at 10 m/s; with 1 s either side no gap
     // of route 10's stream (10 m/s, clear 0.7-1.5 s at the crossing) was ever left
     // (13 Nov: 0.1; the stream's cars keep their speed, and its gaps, free 1.0-1.9 s at the line, take the ego ~2.6 s)
-    double cross_buffer = 0.1;  // [s]
+    double cross_buffer = 0.0;  // [s] (14 Nov: 0, as PDM-Lite, with cross_forecast; was 0.1)
+    // A gap is judged against the crossers' next cross_forecast only, as PDM-Lite judges its hazards on 2 s rolled
+    // forward (a car further off is judged again each plan, until the ego cannot stop short: in_already). INF: all
+    // of the prediction. Route 10: from 8 m short of the oncoming lane, which has a car every ~1.6 s, no gap judged
+    // on the full prediction was ever clear (standhold_r10); PDM-Lite went after 3 cars.
+    double cross_forecast = 2.0;  // [s]
+    // Across a stream the drive is PDM-Lite's: full throttle up to the limit, held through the junction, never above
+    // what the bend allows (no braking in it); turning, at most PDM-Lite's max_speed_in_junction
+    double cross_speed_max = 64.0 / 3.6;  // [m/s]
+    // Waiting for a gap the ego comes up to the furthest point where its body stays this far clear of every crosser's
+    // box at every moment predicted, and waits there: nearer the lane it crosses, the crossing takes less time [m]
+    double cross_wait_margin = 0.5;
     // A crosser slower than this now (a car inching up to its stop line) counts only over the next cross_slow_horizon:
     // whether it then stops or goes is not known, and it is judged again each plan. PDM-Lite, 2 s ahead from their
     // controls, saw route 10's cross-road queue brake; predicted 8 s on at its creep, it shut most of the stream's gaps.
@@ -157,6 +176,11 @@ struct ConstraintOptions : PerceptionOptions {
     // Only the corridor: the band the actors are classified on stays the lane (on it, route 10's oncoming lane beside
     // the band overlapped it, and the cars in it were crossers all along the approach).
     double junction_slack = 0.4;  // [m]
+    // and on the inside of a bend in a junction (curvature over 0.02 1/m) this much more, as PDM-Lite's lateral
+    // controller, looking ahead, turns in before the arc and cuts it (15 Nov, route 10's left at kappa 0.2: held to
+    // the lane the plan turned in late, 6.8 m/s at the corner and grip-bound catching up; 0.5 m more, 8.5 m/s and
+    // 10 m/s^2, the steering rate no longer binding)
+    double junction_cut = 0.5;  // [m]
     double blocker_range = 40.0;  // a blocker nearer than this may be overtaken [m]
     double oncoming_gap = 20.0;  // kept to oncoming traffic when overtaking [m]
     // an oncoming lane inside the band (SimLingo's path changing into it) counts as one to go round through when at
@@ -204,7 +228,7 @@ struct ConstraintOptions : PerceptionOptions {
     double merge_run_up = 15.0;  // [m]
     // and takes the bend into the stream at this lateral acceleration, not the comfortable a_lat_ref: the faster it
     // comes out of the bend the less the car behind closes on it (route 8: 9 m at 3 m/s^2 round a 6 m bend)
-    double merge_a_lat = 8.5;  // [m/s^2] (13 Nov: 8.5, within mu g = 8.8; PDM-Lite takes route 8's bend at 10-18; was 6)
+    double merge_a_lat = 8.5;  // [m/s^2] (13 Nov: 8.5, within mu g (then 8.8, now 15.7); PDM-Lite takes route 8's bend at 10-18; was 6)
     // Going in ahead of a car, expect it to brake at this from when the ego is in its lane (0: it does not slow,
     // the default; Bench2Drive's streams do not, until they hit something). A trial setting, 12 Nov.
     double merge_chaser_brake = 0.0;  // [m/s^2]

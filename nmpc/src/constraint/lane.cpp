@@ -26,10 +26,14 @@ Corridor lane_corridor(const Percept& p, const Scene& sc, const Body& body, cons
         const LaneSection& l = p.section(s);
         const double w = std::clamp((s - s0) / merge, 0.0, 1.0);
         const double slack = std::isfinite(l.road_lo) || std::isfinite(l.road_hi) ? 0.0 : opt.junction_slack;
+        const double kappa = l.junction ? p.route->curvature(s) : 0.0;  // the bend's inside cut (junction_cut)
+        const double cut_lo = kappa < -0.02 ? opt.junction_cut : 0.0, cut_hi = kappa > 0.02 ? opt.junction_cut : 0.0;
         lane.s.push_back(s);
+        lane.junction.push_back(l.junction ? 1.0 : 0.0);
         // but never past the road's edges: a car off the road is asked back onto it at once
-        lane.lo.push_back(std::max(l.road_lo, std::min(l.lo - slack, (1.0 - w) * (z0[IE] - half) + w * (l.lo - slack))));
-        lane.hi.push_back(std::min(l.road_hi, std::max(l.hi + slack, (1.0 - w) * (z0[IE] + half) + w * (l.hi + slack))));
+        const double lo = l.lo - slack - cut_lo, hi = l.hi + slack + cut_hi;
+        lane.lo.push_back(std::max(l.road_lo, std::min(lo, (1.0 - w) * (z0[IE] - half) + w * lo)));
+        lane.hi.push_back(std::min(l.road_hi, std::max(hi, (1.0 - w) * (z0[IE] + half) + w * hi)));
         double ref = 0.5 * (l.lo + l.hi);
         if (!sc.line_s.empty()) {  // the line asked for, kept where the body fits in the lane
             const double margin = 0.5 * body.width + 0.1;

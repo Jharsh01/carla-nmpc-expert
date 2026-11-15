@@ -96,7 +96,14 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
     for (const Way& w : ways)
         for (const Spot& sp : w.spots) s_gate = std::min(s_gate, sp.lo);
     s_gate = std::max(s_gate, p.front0);
-    const double v_top = sc.v_max;
+    // The limit (in the agent PDM-Lite's target where CARLA's sign is lower: simlingo_nmpc_agent.py), turning in a
+    // junction at most cross_speed_max (PDM-Lite's max_speed_in_junction). (Held to 0.72 of the limit, a car at 10
+    // m/s crossing straight ahead of another slowed and came to the crossing as it did: crossing_yield.)
+    bool turning = false;
+    for (size_t i = 0; i < p.bend_s.size(); ++i)
+        turning = turning || (std::fabs(p.bend_kappa[i]) > 0.05 && p.section(p.bend_s[i]).junction);
+    const double v_top = turning ? std::max(std::min(sc.v_max, opt.cross_speed_max), std::min(p.v0, sc.v_max)) : sc.v_max;
+    double s_hold = p.front0;  // where the front waits for its gap (set below: the furthest clear point)
 
     // The ego from now, its speed capped at v_c until t_hold (and not past the gate before then), then as hard as it
     // can within the bends' speed; its front every DT, rolling up to the gate so as to be moving as it opens. Launched
@@ -107,7 +114,9 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         double v = v_top;
         for (size_t i = 0; i < p.bend_s.size(); ++i)
             if (p.bend_s[i] >= s - 1.0) {
-                const double vb = bend_speed(v_top, p.bend_kappa[i], opt.merge_a_lat);
+                // a bend in a junction at what grip allows (turn.hpp), elsewhere at merge_a_lat
+                const double a_lat = p.section(p.bend_s[i]).junction ? no.junction_mu * cs.params.g : opt.merge_a_lat;
+                const double vb = bend_speed(v_top, p.bend_kappa[i], a_lat);
                 v = std::min(v, std::sqrt(vb * vb + 2.0 * no.a_ref * std::max(0.0, p.bend_s[i] - s)));
             }
         return v;
@@ -115,14 +124,16 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
     auto run = [&](double t_hold, double v_c) {
         std::vector<double> front{p.front0};
         double v = p.v0, f = p.front0;
-        const double launch = p.v0 < 0.5 ? 0.2 : 0.0;
+        // the launch's 0.2 s from a standstill only (pdmturn2_r10, 10.9 s: rolling at 0.47 m/s and 1.6 m/s^2, the drive
+        // judged it standing 0.2 s more, the plan was held there by the gates below and braked the start away)
+        const double launch = p.v0 < 0.1 && p.z0[IA] < 0.5 ? 0.2 : 0.0;
         for (double t = 0.0; t < T_CHECK; t += DT) {
             double cap = bend_cap(f - 0.5 * length);
             if (t < t_hold) cap = std::min(cap, v_c);
             if (t < launch) cap = 0.0;
             const double a = 0.95 * cs.params.a_drive(v);
             v = std::max(0.0, std::min(v + a * DT, std::max(cap, v - 1.5 * no.a_ref * DT)));
-            if (t < t_hold && f + v * DT > s_gate) v = std::max(0.0, (s_gate - f) / DT);
+            if (t < t_hold && f + v * DT > s_hold) v = std::max(0.0, (s_hold - f) / DT);
             f += v * DT;
             front.push_back(f);
         }
@@ -138,7 +149,7 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         double lo = 0.0, hi = v_top;
         for (int i = 0; i < 12; ++i) {
             const double mid = 0.5 * (lo + hi);
-            (front_at(run(t_hold, mid), t_hold) <= s_gate + 1e-6 ? lo : hi) = mid;
+            (front_at(run(t_hold, mid), t_hold) <= s_hold + 1e-6 ? lo : hi) = mid;
         }
         return run(t_hold, lo);
     };
@@ -146,15 +157,41 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         const Pose q = p.route->pose(front - 0.5 * length);
         return Box{q.x, q.y, 0.5 * length + OWN_END, 0.5 * cs.body.width + OWN_SIDE, q.psi};
     };
+    // Where it waits: the furthest front, on from where it is, at which its body stays cross_wait_margin clear of
+    // every crosser's box at every moment predicted (rolled up to the path's envelope only, s_gate, its box met
+    // the cars passing there: noback_r10, the front 10.5 m on, every hold failed). Searched to 8 m past s_gate.
+    {
+        constexpr double STEP = 0.25;
+        const double m = opt.cross_wait_margin;
+        auto clear_at = [&](double f) {
+            Box b = own_box(f);
+            b.hl += m, b.hw += m;
+            for (const Way& w : ways)
+                for (const Spot& sp : w.spots)
+                    if (overlap(b, sp.box)) return false;
+            return true;
+        };
+        double f = p.front0;  // where it stands, if even that is not clear (standing still is not judged)
+        if (clear_at(f))
+            while (f + STEP <= s_gate + 8.0 && clear_at(f + STEP)) f += STEP;
+        s_hold = f;
+    }
     // A gap the ego has started across is kept on half the buffer (a start called off leaves it standing in their path).
     auto buffer_of = [&](const Way& w) {
         return going && (last_id == 0 || last_id == w.x->id) ? 0.5 * opt.cross_buffer : opt.cross_buffer;
     };
     std::vector<std::string> why;
-    auto judge = [&](const std::vector<double>& front) {
+    // set off already on this gap: the window counted from then (at least CROSS_MIN_WINDOW on, for what is near)
+    constexpr double CROSS_MIN_WINDOW = 0.5;
+    const bool set_off = going && cs.cross_go_t >= 0.0;
+    double window = opt.cross_forecast;
+    auto judge = [&](const std::vector<double>& front, double t_go) {
         for (const Way& w : ways) {
             const double b = buffer_of(w);
-            for (const Spot& sp : w.spots)
+            for (const Spot& sp : w.spots) {
+                // further off than cross_forecast from when it goes: judged again as it comes (PDM-Lite's 2 s, from
+                // now as it decides to go now; from the hold, or a hold of 1.4 s passed with a car due at 2.7 s)
+                if (sp.t > std::max(0.0, t_go) + window) continue;
                 for (double t = std::max(0.0, sp.t - b - HALF_STEP); t <= sp.t + b + HALF_STEP + 1e-9; t += 0.05)
                     // not where it stands now (waiting there is base's too: at the line, its grown box and those of
                     // the cars passing 2-3 m ahead touched, and no hold was ever clear)
@@ -166,6 +203,7 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
                         if (why.size() > 2) why.erase(why.begin());  // the last holds tried before the one taken
                         return false;
                     }
+            }
         }
         return true;
     };
@@ -180,14 +218,26 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         }
     std::sort(holds.begin(), holds.end());
     double t_hold = -1.0;
-    for (double h : holds)
-        if (judge(drive_from(h))) {
+    for (double h : holds) {
+        window = set_off && h <= 0.0 ? std::max(CROSS_MIN_WINDOW, opt.cross_forecast - (sc.t - cs.cross_go_t))
+                                     : opt.cross_forecast;
+        if (judge(drive_from(h), h)) {
             t_hold = h;
             break;
         }
-    if (t_hold < 0.0 && going && in_already) {
+    }
+    // set off and past stopping short of their path: on, whatever later gap there is (commit_r10: going ahead of a
+    // car 2.9 s off, launched slower than judged, at 25.35 s in the oncoming lane at 5 m/s the gap read shut, a hold of
+    // 2.6 s was clear, it braked to rest in the lane and the car hit it)
+    if (t_hold != 0.0 && going && in_already) {
         t_hold = 0.0;
         out.notes.push_back("cross: no stopping short of their path now, going on");
+    }
+    // going now: when it set off (kept while it goes on), else not going
+    if (t_hold == 0.0) {
+        if (!going || cs.cross_go_t < 0.0) cs.cross_go_t = sc.t;
+    } else {
+        cs.cross_go_t = -1.0;
     }
     if (t_hold < 0.0) {
         std::string note = "cross: no gap clear";
@@ -211,6 +261,7 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
     pr.a_lat_ref = opt.merge_a_lat;
     pr.a_max = INF;  // full throttle, as PDM-Lite goes
     pr.w_accel = 0.02, pr.w_lat = 0.05;  // and not held back by the cost (route 10: it trailed the drive judged on)
+    pr.seed_v_ref = true;  // and solved from that drive, not from the last plan
     // the speed asked for is the drive the gap was judged on (not SimLingo's, which waits)
     pr.v_ref_t.clear(), pr.v_ref.clear();
     for (size_t i = 0; i + 1 < front.size(); ++i) {
@@ -227,7 +278,8 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
             // the car crept into the stream's lane at 0.5-1 m/s (cross2_r10, 15-22 s: a car's centre 0.5 m behind
             // the ego's front)
             const double ahead_at = front_at(front, sp.t + b);
-            const double give = ahead_at > p.front0 + 0.2 ? GIVE : 0.0;
+            // (moving, the give all the same: the plan cannot stop where the drive stands)
+            const double give = ahead_at > p.front0 + 0.2 || p.v0 > 0.3 ? GIVE : 0.0;
             Gate g{past ? front_at(front, std::max(0.0, sp.t - b)) - length - GIVE : ahead_at + give,
                    std::max(0.0, sp.t - b), sp.t + b, !past};
             g.taper = false;
@@ -235,7 +287,14 @@ void cross(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         }
     }
     stay_behind(pr, p);
-    wait_for_mergers(pr, p, opt);
+    // Not held for a merger it is through ahead of: on the judged drive its rear MERGE_CLEAR_M + MERGE_CLEAR_S of the
+    // merger's speed past where the merger's rear comes in, by then (launch_r10, 10.15 s: going across, a cross-road
+    // car at its stop sign due in the lane at 7.1-7.9 s put a gate 10.65 m on till then; the plan, at 1.4 m/s off
+    // full throttle, could not stop short of it, and the ego braked to rest from its start, twice)
+    constexpr double MERGE_CLEAR_M = 6.0, MERGE_CLEAR_S = 1.0;  // [m], [s]
+    wait_for_mergers(pr, p, opt, [&](const Merger& m) {
+        return front_at(front, m.t_in) - length > m.s_in + MERGE_CLEAR_M + MERGE_CLEAR_S * m.speed;
+    });
     char buf[120];
     std::snprintf(buf, sizeof buf, "cross: clear, from %.1f s, ahead of %d", t_hold, first_ahead);
     std::string note = buf;

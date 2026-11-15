@@ -48,6 +48,10 @@ struct Corridor {
     std::vector<double> s;  // ascending [m]
     std::vector<double> lo, hi;  // the drivable band, e_y of its right and left edges [m]
     std::vector<double> ref;  // the line asked for [m]
+    // 1 where s is in a junction, 0 elsewhere (empty: nowhere). Bends there are taken at what grip allows, mu g,
+    // not at a_lat_ref: PDM-Lite takes route 10's left turn at 10 m/s (up to 18 m/s^2) and is across the stream
+    // before the next car; the friction circle (grip.cpp) is the only limit on lateral acceleration there.
+    std::vector<double> junction;
 };
 
 // Something to keep clear of: a circle whose centre follows (s, e_y) at times t from the measurement, held before
@@ -104,6 +108,10 @@ struct Problem {
     // light, so that the plan launches as the gap was judged: with the usual ones it trailed a full-throttle drive by
     // 1.5-2 m/s within a second, on route 10's left turn, and each gap was lost)
     double w_accel = NAN, w_lat = NAN;
+    // the solver started from v_ref (the stages at its speeds along the path, the wheels at the path's curvature), not
+    // from the last plan (crossing.cpp: warm from a plan that slowed, the solve slowed to 6.2 m/s mid-turn where the
+    // judged drive and a cold solve held 9; vlimit_r10)
+    bool seed_v_ref = false;
 };
 
 struct Plan {

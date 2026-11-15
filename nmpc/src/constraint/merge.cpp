@@ -38,9 +38,11 @@ double gate_of(const Percept& p, const ConstraintOptions& opt) {
 
 }  // namespace
 
-void wait_for_mergers(Problem& pr, const Percept& p, const ConstraintOptions& opt) {
+void wait_for_mergers(Problem& pr, const Percept& p, const ConstraintOptions& opt,
+                      const std::function<bool(const Merger&)>& clear_of) {
     const double s_gate = gate_of(p, opt) - opt.merge_run_up;  // back from the entry, with a run-up to it
     for (const Merger& m : p.mergers) {
+        if (clear_of && clear_of(m)) continue;
         pr.gates.push_back(Gate{s_gate, 0.0, m.t_in + opt.merge_lag, true});
         pr.leads.push_back(m.lead);
     }
@@ -93,7 +95,9 @@ void merge(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         double v = v_top;
         for (size_t i = 0; i < p.bend_s.size(); ++i)
             if (p.bend_s[i] >= s - 1.0) {
-                const double vb = bend_speed(v_top, p.bend_kappa[i], opt.merge_a_lat);
+                // a bend in a junction at what grip allows (turn.hpp), elsewhere at merge_a_lat
+                const double a_lat = p.section(p.bend_s[i]).junction ? no.junction_mu * cs.params.g : opt.merge_a_lat;
+                const double vb = bend_speed(v_top, p.bend_kappa[i], a_lat);
                 v = std::min(v, std::sqrt(vb * vb + 2.0 * no.a_ref * std::max(0.0, p.bend_s[i] - s)));
             }
         return v;
@@ -216,8 +220,16 @@ void merge(const Constraints& cs, const Percept& p, const Scene& sc, const std::
         for (size_t i = 0; i < tr.t.size(); ++i)
             if (tr.s[0] < p.s0 && std::fabs(tr.e[i] - p.z0[IE]) < tr.ext_e[i] + 0.5 * cs.body.width + 0.5)
                 room = std::min(room, p.rear0 - (tr.s[i] + tr.ext_s[i]) - opt.peek_rear_gap);
-    const bool back_up = p.v0 < 0.3 && short_by > 2.0 && room > 0.5 && !in_already &&
-                         (found.empty() || found.front()->id != last_id);
+    // Not where there are cars crossing its path too, nor near a stop sign: on route 10 (a left turn, a stop sign on
+    // every approach, the oncoming lane to cross and the stream to join) backing up took the car back out of the
+    // stop's zone, it came forward without a valid stop (a stop infraction), and backed up again; cross() judges
+    // the launch from where it stands (branch_r10).
+    bool near_sign = false;
+    for (const StopLine& st : sc.stops)
+        if (st.kind == StopLine::stop_sign && st.s - p.front0 > -30.0 && st.s - p.front0 < s_gate - p.front0 + 1.0)
+            near_sign = true;
+    const bool back_up = p.v0 < 0.3 && short_by > 2.0 && room > 0.5 && !in_already && p.crossers.empty() &&
+                         !near_sign && (found.empty() || found.front()->id != last_id);
     if (back_up) {
         t_hold = -1.0, found.clear();
         out.reverse = std::min(short_by, room);
